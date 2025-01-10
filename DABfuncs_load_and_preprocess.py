@@ -143,7 +143,7 @@ def load_and_preprocess( rootDir_data = None, subj_ids = None, file_ids = None, 
 
             # load the sidecar json file 
             with open(file_path + '.json') as json_file:
-                file_json = json.load(json_file)
+                 file_json = json.load(json_file)
             pfDAB_dqr.plotDQR_sidecar(file_json, recTmp, rootDir_data, filenm )
 
             snr0 = np.nanmedian(snr0.values)
