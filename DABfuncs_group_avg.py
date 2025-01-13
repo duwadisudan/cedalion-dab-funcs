@@ -11,8 +11,28 @@ import cedalion.models.glm as glm
 
 from cedalion import units
 import numpy as np
+import xarray as xr
 
 
+
+def block_average_od( od_filt, stim, geo3d, trange_hrf, stim_lst_hrf ):
+
+    # get the epochs
+    od_tmp = od_filt.transpose('wavelength', 'channel', 'time')
+    od_tmp = od_tmp.assign_coords(samples=('time', np.arange(len(od_tmp.time))))
+    od_tmp['time'] = od_tmp.time.pint.quantify(units.s)     
+    od_tmp['source'] = od_filt.source
+    od_tmp['detector'] = od_filt.detector
+
+    od_epochs = od_tmp.cd.to_epochs(
+                                stim,  # stimulus dataframe
+                                set(stim[stim.trial_type.isin(stim_lst_hrf)].trial_type), # select events
+#                                set(stim.trial_type),  # select events
+                                before=trange_hrf[0],  # seconds before stimulus
+                                after=trange_hrf[1],  # seconds after stimulus
+                            )
+        
+    return od_epochs
 
 
 def block_average( conc_filt, stim, geo3d, trange_hrf, glm_basis_func_param, glm_drift_order, flag_do_GLM, ssr_rho_thresh, stim_lst_hrf ):
@@ -83,6 +103,43 @@ def block_average( conc_filt, stim, geo3d, trange_hrf, glm_basis_func_param, glm
         
     return conc_epochs_tmp
 
+
+
+
+def y_mean_to_conc( y_mean_tmp, geo3d, wavelength, source, stim_lst_hrf, cov_mean_weighted, trange_hrf ):
+
+    n_chs = y_mean_tmp.shape[0] // 2
+
+    foo = y_mean_tmp.unstack()
+    foo = foo.transpose('channel', 'wavelength', 'reltime')
+    foo = foo.rename({'reltime':'time'})
+    foo['time'].attrs['units'] = 's'
+
+    dpf = xr.DataArray(
+        [1, 1],
+        dims="wavelength",
+        coords={"wavelength": wavelength},
+    )
+    foo_conc = cedalion.nirs.od2conc(foo, geo3d, dpf, spectrum="prahl")
+    foo_conc = foo_conc.rename({'time':'reltime'})
+    foo_conc = foo_conc.assign_coords(source=source)
+    foo_conc = foo_conc.expand_dims('trial_type')
+    foo_conc = foo_conc.assign_coords(trial_type=stim_lst_hrf)
+
+    # baseline subtract
+    foo_conc = foo_conc - foo_conc.sel(reltime=slice(-trange_hrf[0].magnitude, 0)).mean('reltime')
+
+    # set to NaN the noisy channels for viewing purposes
+    cov_mean_weighted_diag = cov_mean_weighted.diagonal()
+    idx_cov = np.where(cov_mean_weighted_diag > 1e-3)[0]
+    idx_cov1 = idx_cov[idx_cov<n_chs]
+    idx_cov2 = idx_cov[idx_cov>=n_chs] - n_chs
+    idx_cov = np.union1d(idx_cov1, idx_cov2)
+
+    foo_conc_tmp = foo_conc.copy()
+    foo_conc_tmp[:,:,idx_cov,:] = np.nan * np.ones(foo_conc[:,:,idx_cov,:].shape) * units.micromolar
+
+    return foo_conc, foo_conc_tmp
 
 
 

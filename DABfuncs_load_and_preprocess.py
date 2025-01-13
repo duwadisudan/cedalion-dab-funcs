@@ -102,6 +102,7 @@ def load_and_preprocess( rootDir_data = None, subj_ids = None, file_ids = None, 
 
             # TDDR
             recTmp['od_tddr'] = motion_correct.TDDR( recTmp['od'] )
+            recTmp['od_o_tddr'] = motion_correct.TDDR( recTmp['od_o'] )
 
             # Get slopes after TDDR before bandpass filtering
             slope_tddr = recTmp['od_tddr'].polyfit(dim='time', deg=1).sel(degree=1)
@@ -116,6 +117,7 @@ def load_and_preprocess( rootDir_data = None, subj_ids = None, file_ids = None, 
 
             # bandpass filter od_tddr
             recTmp['od_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_tddr'], fmin, fmax)
+            recTmp['od_o_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_o_tddr'], fmin, fmax)
 
             # SplineSG Conc
             dpf = xr.DataArray(
@@ -191,7 +193,7 @@ def load_and_preprocess( rootDir_data = None, subj_ids = None, file_ids = None, 
     # plot the group DQR
     pfDAB_dqr.plot_group_dqr( n_subjects, n_files_per_subject, chs_pruned_subjs, slope_base_subjs, slope_tddr_subjs, gvtd_tddr_subjs, snr0_subjs, snr1_subjs, subj_ids, rec, rootDir_data, flag_plot=True )
 
-    return rec, filenm_lst
+    return rec, filenm_lst, chs_pruned_subjs
 
 
 def preprocess(rec = None):
@@ -294,7 +296,7 @@ def pruneChannels( rec = None, snr_thresh = 5, sd_threshs = [1, 45]*units.mm, am
     # record the pruned array in the record
     rec['amp_pruned'] = perc_time_pruned
 
-    # modify xarray of channel labels with value of 1 for channels that are pruned by SCI and/or PSP
+    # modify xarray of channel labels with value of 0.95 for channels that are pruned by SCI and/or PSP
     chs_pruned.loc[drop_list] = 0.95
 
     return rec, chs_pruned, sci, psp
@@ -305,6 +307,7 @@ def ODandGVTD( rec = None ):
 
     # calculate optical density
     rec["od"] = cedalion.nirs.int2od(rec['amp_pruned'])
+    rec["od_o"] = cedalion.nirs.int2od(rec['amp'])
 
     # # get sample frequency of the data
     # fs = frequency.sampling_rate(rec["od"])
