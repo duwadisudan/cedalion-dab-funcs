@@ -130,6 +130,7 @@ def load_and_preprocess( rootDir_data = None, subj_ids = None, file_ids = None, 
 
             # TDDR Conc
             recTmp['conc_tddr'] = cedalion.nirs.od2conc(recTmp['od_tddr'], recTmp.geo3d, dpf, spectrum="prahl")
+            recTmp['conc_o_tddr'] = cedalion.nirs.od2conc(recTmp['od_o_tddr'], recTmp.geo3d, dpf, spectrum="prahl")
 
 
 
@@ -191,7 +192,7 @@ def load_and_preprocess( rootDir_data = None, subj_ids = None, file_ids = None, 
     # End of subject loop
 
     # plot the group DQR
-    pfDAB_dqr.plot_group_dqr( n_subjects, n_files_per_subject, chs_pruned_subjs, slope_base_subjs, slope_tddr_subjs, gvtd_tddr_subjs, snr0_subjs, snr1_subjs, subj_ids, rec, rootDir_data, flag_plot=True )
+    pfDAB_dqr.plot_group_dqr( n_subjects, n_files_per_subject, chs_pruned_subjs, slope_base_subjs, slope_tddr_subjs, gvtd_tddr_subjs, snr0_subjs, snr1_subjs, subj_ids, rec, rootDir_data, flag_plot=False )
 
     return rec, filenm_lst, chs_pruned_subjs
 
@@ -209,6 +210,7 @@ def preprocess(rec = None):
     rec['amp'][indices[0],1,0] = rec['amp'][indices[0],1,1]
 
     # apply a median filter to rec['amp'] along the time dimension
+    # FIXME: this is to handle spikes that arise from the 1e-18 values inserted above or from other causes, but this is an effective LPF
     # Pad the data before applying the median filter
     pad_width = 1  # Adjust based on the kernel size
     padded_amp = rec['amp'].pad(time=(pad_width, pad_width), mode='edge')

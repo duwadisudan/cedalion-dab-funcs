@@ -25,7 +25,7 @@ from scipy import stats
 
 def plotDQR( rec = None, chs_pruned = None, slope = None, filenm = None, flagSave = False, filepath = None, stim_lst_str = None ):
 
-    f, ax = p.subplots(2, 2, figsize=(11, 11))
+    f, ax = p.subplots(3, 2, figsize=(11, 14))
 
     # Plot GVTD
     ax[0][0].plot( rec.aux_ts["gvtd"].time, rec.aux_ts["gvtd"], color='b', label="GVTD")
@@ -46,16 +46,6 @@ def plotDQR( rec = None, chs_pruned = None, slope = None, filenm = None, flagSav
     labels.append(stim_lst_str)
     ax[0][0].legend(handles, labels)
 
-    # # Plot the GVTD Histograms
-    # #thresh = pfDAB.find_gvtd_thresh(rec[idx_file].aux_ts['gvtd'].values, statType, nStd)
-    # thresh = quality.make_gvtd_hist(recTmp.aux_ts['gvtd'].values, plot_thresh=True, stat_type=stat_type, n_std=n_std)
-
-    # # #thresh = pfDAB.find_gvtd_thresh(rec[idx_file].aux_ts['gvtd_tddr'].values, statType, nStd)
-    # thresh_tddr = quality.make_gvtd_hist(recTmp.aux_ts['gvtd_tddr'].values, plot_thresh=True, stat_type=stat_type, n_std=n_std)
-
-
-
-
     # plot the pruned channels
     idx_good = np.where(chs_pruned.values == 0.4)[0]
     plots.scalp_plot( 
@@ -71,9 +61,48 @@ def plotDQR( rec = None, chs_pruned = None, slope = None, filenm = None, flagSav
             optode_size=6
         )
 
+    ax1 = ax[1][0]
+    variance_vals = np.log10( rec['od_o_tddr'].values.var(axis=2))
+    variance_vals_da = xr.DataArray(variance_vals, dims=["channel", "wavelength"], coords={"channel": rec["od"].channel, "wavelength": rec["od"].wavelength})
+    max_variance = np.nanmax(variance_vals)
+    min_variance = np.nanmin(variance_vals)
+    wav =rec['amp'].wavelength.values[0]
+    plots.scalp_plot(
+            rec["od"],
+            rec.geo3d,
+            variance_vals_da.isel(wavelength=0),
+            ax1,
+            cmap='jet',
+            vmin=min_variance,
+            vmax=max_variance,
+            optode_labels=False,
+            title=f"OD_o_tddr Variance - {wav} nm",
+            optode_size=6
+        )
+
+    ax1 = ax[1][1]
+    variance_vals = np.log10( rec['od_tddr'].values.var(axis=2))
+    variance_vals_da = xr.DataArray(variance_vals, dims=["channel", "wavelength"], coords={"channel": rec["od"].channel, "wavelength": rec["od"].wavelength})
+    max_variance = np.nanmax(variance_vals)
+    min_variance = np.nanmin(variance_vals)
+    wav = rec['amp'].wavelength.values[0]
+    plots.scalp_plot(
+            rec["od"],
+            rec.geo3d,
+            variance_vals_da.isel(wavelength=1),
+            ax1,
+            cmap='jet',
+            vmin=min_variance,
+            vmax=max_variance,
+            optode_labels=False,
+            title=f"OD_tddr Variance = {wav} nm",
+            optode_size=6
+        )
+
     # plot the base slope as a scalp plot
     # get the slope values for each channel and change units to per 10min rather than per second
     if slope[0] is not None:
+        ax1 = ax[2][0]
         slope_vals = slope[0].slope.values * 60 * 10
         # create a data array of the slope values
         slope_vals_da = xr.DataArray(slope_vals, dims=["channel", "wavelength"], coords={"channel": rec["od"].channel, "wavelength": rec["od"].wavelength})
@@ -83,7 +112,7 @@ def plotDQR( rec = None, chs_pruned = None, slope = None, filenm = None, flagSav
                 rec["od"],
                 rec.geo3d,
                 slope_vals_da.isel(wavelength=0),
-                ax[1][0],
+                ax1,
                 cmap='jet',
                 vmin=-max_slope,
                 vmax=max_slope,
@@ -93,6 +122,7 @@ def plotDQR( rec = None, chs_pruned = None, slope = None, filenm = None, flagSav
             )
 
     # plot the tddr slope as a scalp plot
+    ax1 = ax[2][1]
     # get the slope values for each channel and change units to per 10min rather than per second
     slope_vals = slope[1].slope.values * 60 * 10
     # create a data array of the slope values
@@ -103,7 +133,7 @@ def plotDQR( rec = None, chs_pruned = None, slope = None, filenm = None, flagSav
             rec["od_tddr"],
             rec.geo3d,
             slope_vals_da.isel(wavelength=0),
-            ax[1][1],
+            ax1,
             cmap='jet',
             vmin=-max_slope,
             vmax=max_slope,
