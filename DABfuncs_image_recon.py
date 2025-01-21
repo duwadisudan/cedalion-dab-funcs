@@ -20,7 +20,7 @@ import tkinter as tk
 from tkinter import filedialog
 
 import sys
-sys.path.append('/Users/dboas/Documents/People/2024/BoasDavid/NN22_Data')
+sys.path.append('U:\eng_research_hrc_binauralhearinglab\Sudan\Labs\Sen Lab\Research_projects\Whole_Head_Cocktail_party\Image_recon_Laura')
 import spatial_basis_funs_ced as sbf 
 
 
