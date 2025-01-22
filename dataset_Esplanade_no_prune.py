@@ -124,10 +124,6 @@ stim_lst_hrf_ica = ['ST'] # which trial_types to consider for which ICA componen
 ica_spatial_mask_thresh = 1.0 # for selecting "etCO2" components to remove
 ica_tstat_thresh = 1.0 # for selecting significant components to keep
 
-
-
-
-
 pca_var_thresh = 0.99 # keep enough PCs to explain this fraction of the variance
 p_ica = 27 # not sure what this does
 
@@ -140,10 +136,10 @@ cov_amp_thresh = 1.1e-6 # threshold for the amplitude of the channels below whic
                         # for ninjaNIRS, negative amp's are set to 1e-6. Sometimes spikes bring the mean slightly above 1e-6
 
 
-flag_ICA_use_pruned_data = True # if True, use the pruned data for ICA, otherwise use the original data
+flag_ICA_use_pruned_data = False # if True, use the pruned data for ICA, otherwise use the original data
                                  # if False, then we need to correct the variances of the pruned channels for the ts_zscore
-flag_calculate_ICA_matrix = True
-flag_do_ica_filter = False
+flag_calculate_ICA_matrix = False
+flag_do_ica_filter = True
 flag_ERBM_vs_EBM = False # if True, use ERBM, otherwise use EBM
 
 
@@ -158,6 +154,9 @@ rec = pfDAB_ERBM.ERBM_run_ica( rec, filenm_lst, flag_ICA_use_pruned_data, ica_lp
 # %% Block Average - unweighted and weighted
 ##############################################################################
 
+import importlib
+importlib.reload(pfDAB_grp_avg)
+
 # FIXME: would be nice to be able to pass OD to run_group_block_average. Should be easy to add
 
 trange_hrf = [5, 35] * units.s # time range for block averaging
@@ -168,26 +167,29 @@ ica_lpf = 1.0 * units.Hz # MUST be the same as used when creating W_ica
 
 subj_id_exclude = [] #['05','07'] # if you want to exclude a subject from the group average
 
+
 flag_save_each_subj = False # if True, will save the block average data for each subject
 
-rec_str = 'conc_tddr'
-y_mean, y_mean_weighted, y_stderr_weighted, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data )
-blockaverage_mean = y_mean
+if 0:
+    rec_str = 'conc_tddr'
+    y_mean, y_mean_weighted, y_stderr_weighted, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data )
+    blockaverage_mean = y_mean
 
-rec_str = 'conc_tddr_ica'
-y_mean, y_mean_weighted, y_stderr_weighted, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data )
-# rename all trial_types in the y_mean_weighted to have '-o-ica' at the end
-blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-ica' for x in y_mean_weighted.trial_type.values])
-blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
+    rec_str = 'conc_tddr_ica'
+    y_mean, y_mean_weighted, y_stderr_weighted, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data )
+    blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-ica' for x in y_mean_weighted.trial_type.values])
+    blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
+else:
+    rec_str = 'od_o_tddr'
+    y_mean, y_mean_weighted, y_stderr_weighted, y_mse_subj = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data )
+    blockaverage_mean_tmp = y_mean_weighted.assign_coords(trial_type=[x + '-o' for x in y_mean_weighted.trial_type.values])
+    blockaverage_mean = blockaverage_mean_tmp
+    # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
 
-# rec_str = 'conc_o_tddr'
-# y_mean, y_mean_weighted, y_stderr_weighted, y_mse_subj = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data )
-# # rename all trial_types in the y_mean_weighted to have '-o' at the end
-# blockaverage_mean_tmp = y_mean_weighted.assign_coords(trial_type=[x + '-o' for x in y_mean_weighted.trial_type.values])
-# blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
-# # # rename all trial_types in the y_mean to have '-oo' at the end
-# # blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-oo' for x in y_mean.trial_type.values])
-# # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
+    rec_str = 'od_o_tddr_ica'
+    y_mean, y_mean_weighted_ica, y_stderr_weighted_ica, y_mse_subj_ica = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data )
+    blockaverage_mean_tmp = y_mean_weighted_ica.assign_coords(trial_type=[x + '-o-ica' for x in y_mean_weighted.trial_type.values])
+    blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
 
 # save the results to a pickle file
 blockaverage = blockaverage_mean
@@ -196,17 +198,34 @@ if flag_save_each_subj:
     # FIXME: this assumes the number of subjects and trial_type. Generalize this in the future.
     # blockaverage = blockaverage.sel(trial_type=['ST', 'ST-ica', 'ST-01', 'ST-ica-01', 'ST-02', 'ST-ica-02', 'ST-03', 'ST-ica-03', 'ST-04', 'ST-ica-04', 'ST-05', 'ST-ica-05', 'ST-06', 'ST-ica-06', 'ST-07', 'ST-ica-07', 'ST-08', 'ST-ica-08', 'ST-09', 'ST-ica-09'])
     blockaverage = blockaverage.sel(trial_type=['ST', 'ST-ica', 'ST-01', 'ST-ica-01', 'ST-02', 'ST-ica-02', 'ST-03', 'ST-ica-03', 'ST-04', 'ST-ica-04', 'ST-06', 'ST-ica-06', 'ST-08', 'ST-ica-08', 'ST-09', 'ST-ica-09'])
+
 file_path_pkl = os.path.join(rootDir_data, 'derivatives', 'processed_data', 'blockaverage.pkl.gz')
 file = gzip.GzipFile(file_path_pkl, 'wb')
-file.write(pickle.dumps([blockaverage, rec[0][0].geo2d, rec[0][0].geo3d]))
+
+if 'chromo' in blockaverage.dims:
+    file.write(pickle.dumps([blockaverage, rec[0][0].geo2d, rec[0][0].geo3d]))
+else:
+    # convert to concentration
+    dpf = xr.DataArray(
+        [1, 1],
+        dims="wavelength",
+        coords={"wavelength": rec[subj_idx][file_idx]['amp'].wavelength},
+    )
+    foo = blockaverage.copy()
+    foo = foo.rename({'reltime':'time'})
+    foo.time.attrs['units'] = 'second'
+    foo = cedalion.nirs.od2conc(foo, rec[0][0].geo3d, dpf, spectrum="prahl")
+    foo = foo.rename({'time':'reltime'})
+    foo = foo.transpose('trial_type','chromo','channel','reltime')
+
+    file.write(pickle.dumps([foo, rec[0][0].geo2d, rec[0][0].geo3d]))
+
 file.close()
 
 blockaverage_all = blockaverage.copy()
 blockaverage_all_o = blockaverage_all.copy()
 
 print('Saved group average HRF to ' + file_path_pkl)
-
-
 
 
 
@@ -239,7 +258,11 @@ Adot, head = pfDAB_img.load_Adot( path_to_dataset, head_model )
 # %% Do the image reconstruction
 ##############################################################################
 
-trial_type_img = 'ST-weighted' # 'DT', 'DT-ica', 'ST', 'ST-ica'
+import importlib
+importlib.reload(pfDAB_img)
+
+
+trial_type_img = 'ST-o' # 'DT', 'DT-ica', 'ST', 'ST-ica'
 t_win = (10, 20)
 file_save = True
 
@@ -257,7 +280,7 @@ sb_cfg = {
 }
 
 alpha_meas_list = [1e0] #[1e-2, 1e-3, 1e-5] #[1e-3]
-alpha_spatial_list = [1e-3]#[1e-2, 1e-4, 1e-5, 1e-3, 1e-1] #[1e-3]
+alpha_spatial_list = [1e-1, 1e-2, 1e-3, 1e-4]#[1e-2, 1e-4, 1e-5, 1e-3, 1e-1] #[1e-3]
 
 
 file_path0 = rootDir_data + 'derivatives/processed_data/'
@@ -269,30 +292,36 @@ spectrum = 'prahl'
 # Get the group average image
 #
 
-# get the group average HRF over a time window
-hrf_conc_mag = blockaverage_all.sel(trial_type=trial_type_img).sel(reltime=slice(t_win[0], t_win[1])).mean('reltime')
-hrf_conc_ts = blockaverage_all.sel(trial_type=trial_type_img)
+if 'chromo' in blockaverage_all.dims:
+    # get the group average HRF over a time window
+    hrf_conc_mag = blockaverage_all.sel(trial_type=trial_type_img).sel(reltime=slice(t_win[0], t_win[1])).mean('reltime')
+    hrf_conc_ts = blockaverage_all.sel(trial_type=trial_type_img)
 
-# convert back to OD
-E = cedalion.nirs.get_extinction_coefficients(spectrum, wavelength)
-hrf_od_mag = xr.dot(E, hrf_conc_mag * 1*units.mm * 1e-6*units.molar / units.micromolar, dim=["chromo"]) # assumes DPF = 1
-hrf_od_ts = xr.dot(E, hrf_conc_ts * 1*units.mm * 1e-6*units.molar / units.micromolar, dim=["chromo"]) # assumes DPF = 1
+    # convert back to OD
+    E = cedalion.nirs.get_extinction_coefficients(spectrum, wavelength)
+    hrf_od_mag = xr.dot(E, hrf_conc_mag * 1*units.mm * 1e-6*units.molar / units.micromolar, dim=["chromo"]) # assumes DPF = 1
+    hrf_od_ts = xr.dot(E, hrf_conc_ts * 1*units.mm * 1e-6*units.molar / units.micromolar, dim=["chromo"]) # assumes DPF = 1
+else:
+    hrf_od_mag = blockaverage_all.sel(trial_type=trial_type_img).sel(reltime=slice(t_win[0], t_win[1])).mean('reltime')
+    hrf_od_ts = blockaverage_all.sel(trial_type=trial_type_img)
 
-# if 0:
-#     idx_reltime = np.where((od_epochs_mean.reltime.values >= t_win[0]) & (od_epochs_mean.reltime.values <= t_win[1]))[0]
-#     hrf_od_mag.values = np.reshape( np.mean(y_mean_weighted[:,idx_reltime],axis=1), (2,n_chs) )
 
 trial_type_img_split = trial_type_img.split('-')
-flag = False
+flag_weighted = False
 if len(trial_type_img_split) > 1:
-    if trial_type_img_split[1] == 'weighted':
-        flag = True
+    if trial_type_img_split[1] == 'o':
+        flag_weighted = True
 
-if not flag:    
+if not flag_weighted:    
     X_grp, W, AAT_norm = pfDAB_img.do_image_recon( hrf_od_mag, head, Adot, None, wavelength, BRAIN_ONLY, SB, sb_cfg, alpha_spatial_list, alpha_meas_list, file_save, file_path0, trial_type_img)
 else:
-    X_grp, W, AAT_norm = pfDAB_img.do_image_recon( hrf_od_mag, head, Adot, cov_mean_weighted, wavelength, BRAIN_ONLY, SB, sb_cfg, alpha_spatial_list, alpha_meas_list, file_save, file_path0, trial_type_img)
+    C_meas = y_stderr_weighted.sel(trial_type=trial_type_img_split[0]).sel(reltime=slice(t_win[0], t_win[1])).mean('reltime') # FIXME: what is the correct error estimate?
+    C_meas = C_meas.pint.dequantify()
+    C_meas = C_meas**2
+    C_meas = C_meas.stack(measurement=('channel', 'wavelength')).sortby('wavelength')
+    X_grp, W, AAT_norm = pfDAB_img.do_image_recon( hrf_od_mag, head, Adot, C_meas, wavelength, BRAIN_ONLY, SB, sb_cfg, alpha_spatial_list, alpha_meas_list, file_save, file_path0, trial_type_img)
 
+print('Done with Image Reconstruction')
 
 
 
@@ -303,10 +332,12 @@ else:
 thresh_noise = 2e-6
 thresh_tstat = 20
 
+# scale columns of W by y_stderr_weighted**2
+cov_img_tmp = W * np.sqrt(C_meas.values)
+cov_img_diag = np.nansum(cov_img_tmp**2, axis=1)
 
-
-cov_img_tmp = W @ cov_mean_weighted
-cov_img_diag = np.nansum(cov_img_tmp * W, axis=1 )
+# cov_img_tmp = W @ cov_mean_weighted
+# cov_img_diag = np.nansum(cov_img_tmp * W, axis=1 )
 
 nV = X_grp.shape[0]
 cov_img_diag = np.reshape( cov_img_diag, (2,nV) ).T
@@ -315,11 +346,11 @@ cov_img_diag = np.reshape( cov_img_diag, (2,nV) ).T
 X_noise = X_grp.copy()
 X_noise.values = np.sqrt(cov_img_diag)
 
-X_noise[ np.where(X_noise[:,0]>thresh_noise)[0], 0 ] = thresh_noise
-X_noise[ np.where(X_noise[:,1]>thresh_noise)[0], 1 ] = thresh_noise
+# X_noise[ np.where(X_noise[:,0]>thresh_noise)[0], 0 ] = thresh_noise
+# X_noise[ np.where(X_noise[:,1]>thresh_noise)[0], 1 ] = thresh_noise
 
-X_noise[ np.where(X_noise[:,0]<-thresh_noise)[0], 0 ] = -thresh_noise
-X_noise[ np.where(X_noise[:,1]<-thresh_noise)[0], 1 ] = -thresh_noise
+# X_noise[ np.where(X_noise[:,0]<-thresh_noise)[0], 0 ] = -thresh_noise
+# X_noise[ np.where(X_noise[:,1]<-thresh_noise)[0], 1 ] = -thresh_noise
 
 filepath = os.path.join(file_path0, f'X_noise_{trial_type_img}_cov_alpha_spatial_{alpha_spatial_list[-1]:.0e}_alpha_meas_{alpha_meas_list[-1]:.0e}.pkl.gz')
 print(f'   Saving to X_noise_{trial_type_img}_cov_alpha_spatial_{alpha_spatial_list[-1]:.0e}_alpha_meas_{alpha_meas_list[-1]:.0e}.pkl.gz')
@@ -333,11 +364,11 @@ X_tstat = X_grp / np.sqrt(cov_img_diag)
 X_tstat[ np.where(cov_img_diag[:,0]==0)[0], 0 ] = 0
 X_tstat[ np.where(cov_img_diag[:,1]==0)[0], 1 ] = 0
 
-X_tstat[ np.where(X_tstat[:,0]>thresh_tstat)[0], 0 ] = thresh_tstat
-X_tstat[ np.where(X_tstat[:,1]>thresh_tstat)[0], 1 ] = thresh_tstat
+# X_tstat[ np.where(X_tstat[:,0]>thresh_tstat)[0], 0 ] = thresh_tstat
+# X_tstat[ np.where(X_tstat[:,1]>thresh_tstat)[0], 1 ] = thresh_tstat
 
-X_tstat[ np.where(X_tstat[:,0]<-thresh_tstat)[0], 0 ] = -thresh_tstat
-X_tstat[ np.where(X_tstat[:,1]<-thresh_tstat)[0], 1 ] = -thresh_tstat
+# X_tstat[ np.where(X_tstat[:,0]<-thresh_tstat)[0], 0 ] = -thresh_tstat
+# X_tstat[ np.where(X_tstat[:,1]<-thresh_tstat)[0], 1 ] = -thresh_tstat
 
 filepath = os.path.join(file_path0, f'X_tstat_{trial_type_img}_cov_alpha_spatial_{alpha_spatial_list[-1]:.0e}_alpha_meas_{alpha_meas_list[-1]:.0e}.pkl.gz')
 print(f'   Saving to X_tstat_{trial_type_img}_cov_alpha_spatial_{alpha_spatial_list[-1]:.0e}_alpha_meas_{alpha_meas_list[-1]:.0e}.pkl.gz')
