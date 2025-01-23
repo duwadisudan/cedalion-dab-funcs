@@ -145,9 +145,11 @@ def load_and_preprocess( rootDir_data = None, subj_ids = None, file_ids = None, 
             pfDAB_dqr.plotDQR( recTmp, chs_pruned, [slope_base, slope_tddr], filenm, flagSave=True, filepath=rootDir_data, stim_lst_str=stim_lst_str )
 
             # load the sidecar json file 
-            with open(file_path + '.json') as json_file:
-                 file_json = json.load(json_file)
-            pfDAB_dqr.plotDQR_sidecar(file_json, recTmp, rootDir_data, filenm )
+            if os.path.exists(file_path + '.json'):
+                with open(file_path + '.json') as json_file:
+                    file_json = json.load(json_file)
+                if 'dataSDWP_LowHigh' in file_json:
+                    pfDAB_dqr.plotDQR_sidecar(file_json, recTmp, rootDir_data, filenm )
 
             snr0 = np.nanmedian(snr0.values)
             snr1 = np.nanmedian(snr1.values)

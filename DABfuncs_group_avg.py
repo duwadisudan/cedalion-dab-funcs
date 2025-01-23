@@ -35,7 +35,7 @@ def run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim
             # do the block average on the data in rec[subj_idx][file_idx][rec_str]
             # rec_str could be 'conc_tddr', 'conc_tddr_ica' or 'od' or even conc_splineSG
             conc_filt = rec[subj_idx][file_idx][rec_str].copy()
-            # FIXME: sould I do this here now that this code has evolved? Seems like it should be handled before this function.
+            # FIXME: should I do this here now that this code has evolved? Seems like it should be handled before this function.
             # FIXME: oddly it is turning my tddr-ica to nan
             # conc_filt = cedalion.sigproc.frequency.freq_filter(conc_filt, 0 * units.Hz, ica_lpf ) # LPF the data to match the ICA data
 
@@ -47,7 +47,11 @@ def run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim
             stim = rec[subj_idx][file_idx].stim.copy()
 
             # get the epochs
-            conc_filt = conc_filt.transpose('chromo', 'channel', 'time')
+            # check if conc_filt has dimenstion chromo
+            if 'chromo' in conc_filt.dims:
+                conc_filt = conc_filt.transpose('chromo', 'channel', 'time')
+            else:
+                conc_filt = conc_filt.transpose('wavelength', 'channel', 'time')
             conc_filt = conc_filt.assign_coords(samples=('time', np.arange(len(conc_filt.time))))
             conc_filt['time'] = conc_filt.time.pint.quantify(units.s)     
 
@@ -84,35 +88,57 @@ def run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim
         n_epochs = conc_epochs.shape[0]
         n_chs = conc_epochs.shape[2]
         foo = conc_epochs - blockaverage_weighted[0,:,:,:] # FIXME: assuming one trial_type
-        foo_t = foo.stack(measurement=['channel','chromo']).sortby('chromo')
+        if 'chromo' in conc_filt.dims:
+            foo_t = foo.stack(measurement=['channel','chromo']).sortby('chromo')
+        else:
+            foo_t = foo.stack(measurement=['channel','wavelength']).sortby('wavelength')
         foo_t = foo_t.transpose('measurement', 'reltime', 'epoch')
         mse_t = (foo_t**2).sum('epoch') / (n_epochs - 1)**2 # this is squared to get variance of the mean, aka MSE of the mean
         # remove the units from mse_t
         # mse_t = mse_t.pint.dequantify()
 
         # adjust the MSE to handle bad data
-        mse_val_for_bad_data = 1e7 * units.micromolar**2 # FIXME: this should probably be passed
-        mse_amp_thresh = 1.1e-6 # FIXME: this should probably be passed
-        mse_min_thresh = 1e0 * units.micromolar**2 # FIXME: this should probably be passed
-                                                    # FIXME: what if OD units?
+        if 'chromo' in conc_filt.dims:
+            mse_val_for_bad_data = 1e7 * units.micromolar**2 # FIXME: this should probably be passed
+            mse_amp_thresh = 1.1e-6 # FIXME: this should probably be passed
+            mse_min_thresh = 1e0 * units.micromolar**2 # FIXME: this should probably be passed
+            blockaverage_val = 0 * units.micromolar
+        else:
+            mse_val_for_bad_data = 1e1  # FIXME: this should probably be passed
+            mse_amp_thresh = 1.1e-6 # FIXME: this should probably be passed
+            mse_min_thresh = 1e-6  # FIXME: this should probably be passed
+            blockaverage_val = 0
 
         # list of channel elements in mse corresponding to channels with amp < mse_amp_thresh
-        amp = rec[subj_idx][file_idx]['amp'].mean('time').min('wavelength')
+        amp = rec[subj_idx][file_idx]['amp'].mean('time').min('wavelength') # take the minimum across wavelengths
         idx_amp = np.where(amp < mse_amp_thresh)[0]
         mse_t[idx_amp,:] = mse_val_for_bad_data
         mse_t[idx_amp + n_chs,:] = mse_val_for_bad_data
-        blockaverage_weighted[0,0,idx_amp,:] = 0 * units.micromolar # FIXME: first dimension is trial_type
-        blockaverage_weighted[0,1,idx_amp,:] = 0 * units.micromolar # FIXME: what if is OD units?
+        blockaverage_weighted[0,0,idx_amp,:] = blockaverage_val # FIXME: first dimension is trial_type
+        blockaverage_weighted[0,1,idx_amp,:] = blockaverage_val 
         
         # look at saturated channels
         idx_sat = np.where(chs_pruned_subjs[subj_idx][file_idx] == 0.0)[0]
         mse_t[idx_sat,:] = mse_val_for_bad_data
         mse_t[idx_sat + n_chs,:] = mse_val_for_bad_data
-        blockaverage_weighted[0,0,idx_sat,:] = 0 * units.micromolar # FIXME: first dimension is trial_type
-        blockaverage_weighted[0,1,idx_sat,:] = 0 * units.micromolar # FIXME: what if is OD units?
+        blockaverage_weighted[0,0,idx_sat,:] = blockaverage_val # FIXME: first dimension is trial_type
+        blockaverage_weighted[0,1,idx_sat,:] = blockaverage_val 
+
+        # where mse_t is 0, set it to mse_val_for_bad_data
+        # I am trying to handle those rare cases where the mse is 0 for some subjects and then it corrupts 1/mse
+        idx_bad = np.where(mse_t == 0)[0]
+        idx_bad1 = idx_bad[idx_bad<n_chs]
+        idx_bad2 = idx_bad[idx_bad>=n_chs] - n_chs
+        mse_t[idx_bad] = mse_val_for_bad_data
+        blockaverage_weighted[0,0,idx_bad1,:] = blockaverage_val
+        blockaverage_weighted[0,1,idx_bad2,:] = blockaverage_val
+        # FIXME: do I set blockaverage_weighted too?
 
         # set the minimum value of mse_t
-        mse_t = mse_t.unstack('measurement').transpose('chromo','channel','reltime')
+        if 'chromo' in conc_filt.dims:
+            mse_t = mse_t.unstack('measurement').transpose('chromo','channel','reltime')
+        else:
+            mse_t = mse_t.unstack('measurement').transpose('wavelength','channel','reltime')
         mse_t = mse_t.expand_dims('trial_type')
         source_coord = blockaverage['source']
         mse_t = mse_t.assign_coords(source=('channel',source_coord.data))
@@ -158,7 +184,16 @@ def run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim
 
     # get the weighted average
     blockaverage_mean_weighted = blockaverage_mean_weighted / blockaverage_mse_inv_mean_weighted
-    blockaverage_stderr_weighted = np.sqrt(1 / blockaverage_mse_inv_mean_weighted)
+
+    mse_mean_within_subject = 1 / blockaverage_mse_inv_mean_weighted
+    
+    mse_weighted_between_subjects_tmp = (blockaverage_subj - blockaverage_mean_weighted)**2 / blockaverage_mse_subj
+    mse_weighted_between_subjects = mse_weighted_between_subjects_tmp.mean('subj')
+    mse_weighted_between_subjects = mse_weighted_between_subjects * mse_mean_within_subject
+
+    # blockaverage_stderr_weighted = np.sqrt(1 / blockaverage_mse_inv_mean_weighted)
+    blockaverage_stderr_weighted = np.sqrt( mse_mean_within_subject + mse_weighted_between_subjects )
+    blockaverage_stderr_weighted = blockaverage_stderr_weighted.assign_coords(trial_type=blockaverage_mean_weighted.trial_type)
 
 
     # plot the MSE histogram
@@ -167,7 +202,10 @@ def run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim
     # plot the diagonals for all subjects
     ax1 = ax[0]
     foo = blockaverage_mse_subj.mean('reltime')
-    foo = foo.stack(measurement=['channel','chromo']).sortby('chromo')
+    if 'chromo' in conc_filt.dims:
+        foo = foo.stack(measurement=['channel','chromo']).sortby('chromo')
+    else:
+        foo = foo.stack(measurement=['channel','wavelength']).sortby('wavelength')
     for i in range(n_subjects):
         ax1.semilogy(foo[i,0,:], linewidth=0.5,alpha=0.5)
     ax1.set_title('variance in the mean for all subjects')
@@ -177,9 +215,12 @@ def run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim
     # histogram the diagonals
     ax1 = ax[1]
     foo1 = np.concatenate([foo[i][0] for i in range(n_subjects)])
-    foo1 = np.where(foo1 < 1e-2, 1e-2, foo1) # set the minimum value to 1e-2
+    foo1 = np.where(foo1 == 0, mse_val_for_bad_data, foo1) # some bad data gets through. amp=1e-6, but it is missed by the check above. Only 2 channels in 9 subjects. Seems to be channel 271
     ax1.hist(np.log10(foo1), bins=100)
-    ax1.axvline(np.log10(mse_min_thresh.magnitude), color='r', linestyle='--', label=f'cov_min_thresh={mse_min_thresh.magnitude:.2e}')
+    if 'chromo' in conc_filt.dims:
+        ax1.axvline(np.log10(mse_min_thresh.magnitude), color='r', linestyle='--', label=f'cov_min_thresh={mse_min_thresh.magnitude:.2e}')
+    else:
+        ax1.axvline(np.log10(mse_min_thresh), color='r', linestyle='--', label=f'cov_min_thresh={mse_min_thresh:.2e}')
     ax1.legend()
     ax1.set_title('histogram for all subjects of variance in the mean')
     ax1.set_xlabel('log10(cov_diag)')

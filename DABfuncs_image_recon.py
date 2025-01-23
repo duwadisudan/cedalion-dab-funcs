@@ -191,7 +191,11 @@ def do_image_recon( hrf_od = None, head = None, Adot = None, C_meas = None, wave
                     W = D @ np.linalg.inv(C  + lambda_meas * np.eye(A.shape[0]) )
                 else:
                     lambda_meas = alpha_meas * f
-                    W = D @ np.linalg.inv(C + lambda_meas * C_meas)
+                    # check if C_meas has 2 dimensions
+                    if len(C_meas.shape) == 2:
+                        W = D @ np.linalg.inv(C + lambda_meas * C_meas)
+                    else:
+                        W = D @ np.linalg.inv(C + lambda_meas * np.diag(C_meas))
             nvertices = W.shape[0]//2
         
             #% GENERATE IMAGES FOR DIFFERENT IMAGE PARAMETERS AND ALSO FOR THE FULL TIMESERIES
