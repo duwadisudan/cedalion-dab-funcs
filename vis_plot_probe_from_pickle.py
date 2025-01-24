@@ -10,7 +10,7 @@ import cedalion.vis.plot_probe as vPlotProbe
 if os.path.exists('blockaverage.pkl.gz'):
     with gzip.open('blockaverage.pkl.gz', 'rb') as f:
         blockaverage_all, geo2d, geo3d  = pickle.load(f)
-    vPlotProbe.run_vis(snirfData = blockaverage_all, geo2d = geo2d, geo3d = geo3d)
+    vPlotProbe.run_vis(blockaverage = blockaverage_all, geo2d = geo2d, geo3d = geo3d)
 
 else:
 
@@ -33,6 +33,6 @@ else:
         with gzip.open(file_path, 'rb') as f:
             blockaverage_all, geo2d, geo3d  = pickle.load(f)
 
-        vPlotProbe.run_vis(snirfData = blockaverage_all, geo2d = geo2d, geo3d = geo3d)
+        vPlotProbe.run_vis(blockaverage = blockaverage_all, geo2d = geo2d, geo3d = geo3d)
     else:
         print("No file selected.")
