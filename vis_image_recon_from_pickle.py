@@ -56,7 +56,7 @@ else:
 #%% load in head model and sensitivity profile 
 
 # root directory
-rootDir_data = '/Users/dboas/Documents/People/2024/BoasDavid/NN22_Data/Datasets/BallSqueezing_WHHD/'
+rootDir_data = 'U:\\eng_research_hrc_binauralhearinglab\\Sudan\\Labs\\Sen Lab\\Research_projects\\Whole_Head_Cocktail_party\\Cocktail_party_whole_head_master_data\\'
 
 head_model = 'ICBM152'
 
