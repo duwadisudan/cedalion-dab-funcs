@@ -101,8 +101,8 @@ def load_and_preprocess( rootDir_data = None, subj_ids = None, file_ids = None, 
                 slope = None
 
             # TDDR
-            recTmp['od_tddr'] = motion_correct.TDDR( recTmp['od'] )
-            recTmp['od_o_tddr'] = motion_correct.TDDR( recTmp['od_o'] )
+            recTmp['od_tddr'] = motion_correct.tddr( recTmp['od'] )
+            recTmp['od_o_tddr'] = motion_correct.tddr( recTmp['od_o'] )
 
             # Get slopes after TDDR before bandpass filtering
             slope_tddr = recTmp['od_tddr'].polyfit(dim='time', deg=1).sel(degree=1)
@@ -113,7 +113,7 @@ def load_and_preprocess( rootDir_data = None, subj_ids = None, file_ids = None, 
             # GVTD for TDDR before bandpass filtering
             amp_tddr = recTmp['od_tddr'].copy()
             amp_tddr.values = np.exp(-amp_tddr.values)
-            recTmp.aux_ts['gvtd_tddr'] = quality.gvtd(amp_tddr)
+            recTmp.aux_ts['gvtd_tddr'], _ = quality.gvtd(amp_tddr)
 
             # bandpass filter od_tddr
             recTmp['od_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_tddr'], fmin, fmax)
@@ -317,7 +317,7 @@ def ODandGVTD( rec = None ):
     # fs = frequency.sampling_rate(rec["od"])
 
     # Calculate gvtd
-    rec.aux_ts["gvtd"] = quality.gvtd(rec['amp_pruned'])
+    rec.aux_ts["gvtd"], _ = quality.gvtd(rec['amp_pruned'])
     # rec.aux_ts["gvtd"] = rec.aux_ts["gvtd"] * fs # convert to OD per second units
 
     return rec

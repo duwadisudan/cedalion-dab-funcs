@@ -20,7 +20,7 @@ from scipy import stats
 
 
 
-def ERBM_run_ica( rec, filenm_lst, flag_ICA_use_pruned_data, ica_lpf, ica_downsample, cov_amp_thresh, chs_pruned_subjs, pca_var_thresh, flag_calculate_ICA_matrix, flag_ERBM_vs_EBM, p_ica, rootDir_data, flag_do_ica_filter, ica_spatial_mask_thresh, ica_tstat_thresh, trange_hrf, trange_hrf_stat, stim_lst_hrf_ica ):
+def ERBM_run_ica( rec, filenm_lst, flag_ICA_use_pruned_data, ica_lpf, ica_downsample, cov_amp_thresh, chs_pruned_subjs, pca_var_thresh, flag_do_pca_filter, flag_calculate_ICA_matrix, flag_ERBM_vs_EBM, p_ica, rootDir_data, flag_do_ica_filter, ica_spatial_mask_thresh, ica_tstat_thresh, trange_hrf, trange_hrf_stat, stim_lst_hrf_ica ):
 
     n_subjects = len(rec)
     n_files_per_subject = len(rec[0])
@@ -69,6 +69,56 @@ def ERBM_run_ica( rec, filenm_lst, flag_ICA_use_pruned_data, ica_lpf, ica_downsa
                 S_pca_thresh, W_pca, num_components = ERBM_pca_step( TS, pca_var_thresh, flag_ICA_use_pruned_data )
             print(f'   number of PCA components kept: {num_components}')
 
+            if flag_do_pca_filter:
+                # scale the columns of new_ts by ts_std
+                ts_mean = TS.mean('time') # needed for projecting back to channel space from PCA space
+                ts_std = TS.std('time')
+                ts_zscore = stats.zscore(TS.values, axis=0)
+
+                # get indices of mean_ts_zscore with NaN
+                mean_ts_zscore = ts_zscore.mean(axis=0)
+                idx_not_nan = np.where(~np.isnan(mean_ts_zscore))[0]
+
+                # project back to channel space
+                new_ts = np.full((ts_zscore.shape[0],ts_std.shape[0]), np.nan)
+                if flag_ICA_use_pruned_data:
+                    new_ts[:,idx_not_nan] = S_pca_thresh @ W_pca
+                else:
+                    new_ts = S_pca_thresh @ W_pca
+
+                ts_std_values = ts_std.values
+                if flag_ICA_use_pruned_data:
+                    new_ts[:,idx_not_nan] = new_ts[:,idx_not_nan] @ np.diag(ts_std_values[idx_not_nan]) + ts_mean[idx_not_nan].values
+                else:
+                    new_ts[:,idx_not_nan] = new_ts[:,idx_not_nan] @ np.diag(ts_std_values[idx_not_nan]**2) + ts_mean[idx_not_nan].values
+
+                new_xr = xr.zeros_like(TS)
+                new_xr.values = new_ts
+                new_xr = new_xr.unstack("measurement")
+
+                detector_coord = new_xr["detector"].data[:, 0]
+                new_xr = new_xr.assign_coords(detector=("channel", detector_coord))
+                source_coord = new_xr["source"].data[:, 0]
+                new_xr = new_xr.assign_coords(source=("channel", source_coord))
+
+                new_xr = new_xr.transpose("channel", "wavelength", "time")
+                new_xr.time.attrs['units'] = 'second'
+
+                # convert to concentration
+                dpf = xr.DataArray(
+                    [1, 1],
+                    dims="wavelength",
+                    coords={"wavelength": rec[subj_idx][file_idx]['amp'].wavelength},
+                )
+
+                if flag_ICA_use_pruned_data:
+                    rec[subj_idx][file_idx]['od_tddr_pca'] = new_xr
+                    rec[subj_idx][file_idx]['conc_tddr_pca'] = cedalion.nirs.od2conc(rec[subj_idx][file_idx]['od_tddr_pca'], rec[subj_idx][file_idx].geo3d, dpf, spectrum="prahl")
+                else:
+                    rec[subj_idx][file_idx]['od_o_tddr_pca'] = new_xr
+                    rec[subj_idx][file_idx]['conc_o_tddr_pca'] = cedalion.nirs.od2conc(rec[subj_idx][file_idx]['od_o_tddr_pca'], rec[subj_idx][file_idx].geo3d, dpf, spectrum="prahl")  
+
+
             if flag_calculate_ICA_matrix:
                 # ICA-ERBM on PCs
                 import time
@@ -95,6 +145,7 @@ def ERBM_run_ica( rec, filenm_lst, flag_ICA_use_pruned_data, ica_lpf, ica_downsa
                 else:
                     np.savez(file_path + f'_od_o_tddr_ds{ica_downsample}.npz', W_ica=W_ica )
                     
+
             if flag_do_ica_filter:
                 # load W_ica from file
                 file_path = os.path.join(rootDir_data, 'derivatives', 'ica', filenm )

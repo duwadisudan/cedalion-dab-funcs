@@ -215,7 +215,11 @@ def run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim
     # histogram the diagonals
     ax1 = ax[1]
     foo1 = np.concatenate([foo[i][0] for i in range(n_subjects)])
-    foo1 = np.where(foo1 == 0, mse_val_for_bad_data, foo1) # some bad data gets through. amp=1e-6, but it is missed by the check above. Only 2 channels in 9 subjects. Seems to be channel 271
+    # check if mse_val_for_bad_data has units
+    if 'chromo' in conc_filt.dims:
+        foo1 = np.where(foo1 == 0, mse_val_for_bad_data.magnitude, foo1) # some bad data gets through. amp=1e-6, but it is missed by the check above. Only 2 channels in 9 subjects. Seems to be channel 271
+    else:
+        foo1 = np.where(foo1 == 0, mse_val_for_bad_data, foo1)
     ax1.hist(np.log10(foo1), bins=100)
     if 'chromo' in conc_filt.dims:
         ax1.axvline(np.log10(mse_min_thresh.magnitude), color='r', linestyle='--', label=f'cov_min_thresh={mse_min_thresh.magnitude:.2e}')
