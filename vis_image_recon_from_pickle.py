@@ -121,7 +121,10 @@ positions = [ 'xy',
     (-0.05508155730503299, 0.021062586851317233, 0.9982596803838084)]
 ]
 pos_names = ['superior'] #['superior', 'left']
-clim=(-X_hbo_brain.max(), X_hbo_brain.max())
+
+# clim=(-np.max(X_hbo_brain), np.max(X_hbo_brain))
+
+clim=(-np.percentile(X_hbo_brain, 99), np.percentile(X_hbo_brain, 99))
 
 print('before the loop')
 for name, camera_position in zip(pos_names, positions):
@@ -176,3 +179,5 @@ for name, camera_position in zip(pos_names, positions):
 
 print('done')
 
+
+# %%

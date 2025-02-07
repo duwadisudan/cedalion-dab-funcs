@@ -53,8 +53,8 @@ subj_ids = ['01','02','03','04','05','10','11','12','13','14','15','18']
 file_ids = ['Overt_run-01','Overt_run-02']
 
 # list of stim trial_types to include...
-stim_lst_dqr = ['Overt Left'] # for DQR plots
-stim_lst_hrf = ['Overt Left'] # for calculating HRFs
+stim_lst_dqr = ['Overt Right'] # for DQR plots
+stim_lst_hrf = ['Overt Right'] # for calculating HRFs
 
 # pruning parameters
 snr_thresh = 5 # the SNR (std/mean) of a channel. 
@@ -135,7 +135,7 @@ else:
 # trange_hrf = [2, 20] * units.s # time range for block averaging
 # trange_hrf_stat = [2, 15] # time range for t-stat
 
-# stim_lst_hrf = ['Overt Left'] # for calculating HRFs
+# stim_lst_hrf = ['Overt Right'] # for calculating HRFs
 
 # ica_spatial_mask_thresh = 1.0 # for selecting "etCO2" components to remove
 # ica_tstat_thresh = 1.0 # for selecting significant components to keep
@@ -175,11 +175,11 @@ importlib.reload(pfDAB_grp_avg)
 
 # FIXME: would be nice to be able to pass OD to run_group_block_average. Should be easy to add
 
-trange_hrf = [2, 20] * units.s # time range for block averaging
+trange_hrf = [2, 15] * units.s # time range for block averaging
 trange_hrf_stat = [2, 15] # time range for t-stat
 
-#stim_lst_hrf = ['Overt Left'] # for calculating HRFs
-stim_lst_hrf = ['Overt Left'] # for calculating HRFs
+#stim_lst_hrf = ['Overt Right'] # for calculating HRFs
+stim_lst_hrf = ['Overt Right'] # for calculating HRFs
 
 
 ica_lpf = 1.0 * units.Hz # MUST be the same as used when creating W_ica
@@ -205,7 +205,6 @@ else:
     y_mean, y_mean_weighted, y_stderr_weighted, y_mse_subj = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data )
     blockaverage_mean_tmp = y_mean_weighted.assign_coords(trial_type=[x + '-o' for x in y_mean_weighted.trial_type.values])
     blockaverage_mean = blockaverage_mean_tmp
-    blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
 
     # rec_str = 'od_o_tddr_ica'
     # y_mean, y_mean_weighted_ica, y_stderr_weighted_ica, y_mse_subj_ica = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data )
@@ -284,8 +283,8 @@ import importlib
 importlib.reload(pfDAB_img)
 
 
-trial_type_img = 'Overt Left-o' # 'DT', 'DT-ica', 'ST', 'ST-ica'
-t_win = (3, 10)
+trial_type_img = 'Overt Right-o' # 'DT', 'DT-ica', 'ST', 'ST-ica'
+t_win = (5, 8)
 file_save = True
 
 BRAIN_ONLY = False
@@ -301,8 +300,8 @@ sb_cfg = {
     'lambda2': 0.1
 }
 
-alpha_meas_list = [1e-3] # explore for every dataset #[1e0] #[1e-2, 1e-3, 1e-5] #
-alpha_spatial_list = [1e-1, 1e-2, 1e-3, 1e-4]#[1e-2, 1e-4, 1e-5, 1e-3, 1e-1] #[1e-3]
+alpha_meas_list = [1] #C_meas # explore for every dataset #[1e0] #[1e-2, 1e-3, 1e-5] #
+alpha_spatial_list = [0.1]#[1e-2, 1e-4, 1e-5, 1e-3, 1e-1] #[1e-3] lower = deeper
 
 
 file_path0 = rootDir_data + 'derivatives/processed_data/'
@@ -410,34 +409,34 @@ p0 = pfDAB_img.plot_image_recon(X_tstat, head, 'hbo_brain', 'left')
 
 
 # %% plot SVS of the MSE compared with that of A A.T
-##############################################################################
+# ##############################################################################
 
-u,s,v = np.linalg.svd(AAT_norm)
-u1,s1,v1 = np.linalg.svd(cov_mean_weighted*alpha_meas_list[-1])
+# u,s,v = np.linalg.svd(AAT_norm)
+# u1,s1,v1 = np.linalg.svd(cov_mean_weighted*alpha_meas_list[-1])
 
-f,ax = p.subplots(2,1,figsize=(8,10))
+# f,ax = p.subplots(2,1,figsize=(8,10))
 
-ax1 = ax[0]
-ax1.semilogy(AAT_norm.diagonal(),label='A A.T')
-ax1.semilogy(cov_mean_weighted.diagonal()*alpha_meas_list[-1],label='MSE')
-ax1.legend()
-ax1.set_title(fr'Diagonal of (A A.T)/norm and MSE*$\alpha_{{meas}}$={alpha_meas_list[-1]:.2e}')
+# ax1 = ax[0]
+# ax1.semilogy(AAT_norm.diagonal(),label='A A.T')
+# ax1.semilogy(cov_mean_weighted.diagonal()*alpha_meas_list[-1],label='MSE')
+# ax1.legend()
+# ax1.set_title(fr'Diagonal of (A A.T)/norm and MSE*$\alpha_{{meas}}$={alpha_meas_list[-1]:.2e}')
 
-ax1 = ax[1]
-ax1.semilogy(s,label='A A.T')
-ax1.semilogy(s1,label='MSE')
-ax1.legend()
-ax1.set_title(r'Singular Values of (A A.T)/norm and MSE*$\alpha_{{meas}}$')
+# ax1 = ax[1]
+# ax1.semilogy(s,label='A A.T')
+# ax1.semilogy(s1,label='MSE')
+# ax1.legend()
+# ax1.set_title(r'Singular Values of (A A.T)/norm and MSE*$\alpha_{{meas}}$')
 
-p.show()
+# p.show()
 
-# give a title to the figure
-dirnm = os.path.basename(os.path.normpath(rootDir_data))
-p.suptitle(f'Data set - {dirnm}')
+# # give a title to the figure
+# dirnm = os.path.basename(os.path.normpath(rootDir_data))
+# p.suptitle(f'Data set - {dirnm}')
 
-p.savefig( os.path.join(rootDir_data, 'derivatives', 'plots', "DQR_group_AAT_svs.png") )
+# p.savefig( os.path.join(rootDir_data, 'derivatives', 'plots', "DQR_group_AAT_svs.png") )
 
-p.show()
+# p.show()
 
 
 
@@ -470,7 +469,7 @@ Xo_parcel = Xo.groupby('parcel').mean(dim='vertex')
 #display(Xo_parcel)
 
 # find Xo_parcel values > 2 and from parcels_LH
-Xo_parcel_2 = Xo_parcel.where(np.abs(Xo_parcel) > 5).dropna('parcel').where(Xo_parcel['parcel'].isin(parcels_LH)).dropna('parcel')
+Xo_parcel_2 = Xo_parcel.where(np.abs(Xo_parcel) > 0.9).dropna('parcel').where(Xo_parcel['parcel'].isin(parcels_LH)).dropna('parcel')
 
 # Xo_parcel_2 = Xo_parcel.where(Xo_parcel > 3)
 # Xo_parcel_2 = Xo_parcel_2.dropna(dim='parcel')
