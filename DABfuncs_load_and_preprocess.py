@@ -19,55 +19,43 @@ import json
 
 # import my own functions from a different directory
 import sys
-sys.path.append('/Users/dboas/Documents/GitHub/cedalion-dab-funcs')
 import DABfuncs_plot_DQR as pfDAB_dqr
 
 
 
 
-def load_and_preprocess( rootDir_data = None, subj_ids = None, file_ids = None, snr_thresh = 2, sd_threshs = [0, 45], amp_threshs = [0.002, 0.9], stim_lst_str = None, flag_do_splineSG = False, fmin = 0.02 * units.Hz, fmax = 3 * units.Hz ):
+
+def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
 
     # make sure derivatives folders exist
-    der_dir = os.path.join(rootDir_data, 'derivatives')
+    der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives')
     if not os.path.exists(der_dir):
         os.makedirs(der_dir)
-    der_dir = os.path.join(rootDir_data, 'derivatives', 'plots')
+    der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots')
     if not os.path.exists(der_dir):
         os.makedirs(der_dir)
-    der_dir = os.path.join(rootDir_data, 'derivatives', 'ica')
+    der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'ica')
     if not os.path.exists(der_dir):
         os.makedirs(der_dir)
-    der_dir = os.path.join(rootDir_data, 'derivatives', 'processed_data')
+    der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data')
     if not os.path.exists(der_dir):
         os.makedirs(der_dir)
 
-    # files to load
-    for subj_id in subj_ids:
-        subj_idx = subj_ids.index(subj_id)
-        for file_id in file_ids:
-            file_idx = file_ids.index(file_id)
-            filenm = f'sub-{subj_id}_task-{file_id}_nirs'
-            if subj_idx == 0 and file_idx == 0:
-                filenm_lst = []
-                filenm_lst.append( [filenm] )
-            elif file_idx == 0:
-                filenm_lst.append( [filenm] )
-            else:
-                filenm_lst[subj_idx].append( filenm )
 
-    n_subjects = len(subj_ids)
-    n_files_per_subject = len(file_ids)
+
+    n_subjects = len(cfg_dataset['subj_ids'])
+    n_files_per_subject = len(cfg_dataset['file_ids'])
 
     # loop over subjects and files
     for subj_idx in range(n_subjects):
         for file_idx in range(n_files_per_subject):
 
-            filenm = filenm_lst[subj_idx][file_idx]
+            filenm = cfg_dataset['filenm_lst'][subj_idx][file_idx]
 
             print( f"Loading {subj_idx+1} of {n_subjects} subjects, {file_idx+1} of {n_files_per_subject} files : {filenm}" )
 
             subStr = filenm.split('_')[0]
-            subDir = os.path.join(rootDir_data, subStr, 'nirs')
+            subDir = os.path.join(cfg_dataset['root_dir'], subStr, 'nirs')
 
             file_path = os.path.join(subDir, filenm )
             records = cedalion.io.read_snirf( file_path ) 
@@ -82,10 +70,20 @@ def load_and_preprocess( rootDir_data = None, subj_ids = None, file_ids = None, 
                 stim_df = pd.read_csv( file_path[:-5] + '_events.tsv', sep='\t' )
                 recTmp.stim = stim_df
 
-            recTmp = preprocess( recTmp )
-            recTmp, chs_pruned, sci, psp = pruneChannels( recTmp, snr_thresh, sd_threshs, amp_threshs )
-            recTmp = ODandGVTD( recTmp )
+            
 
+            recTmp = preprocess( recTmp, cfg_preprocess['median_filt'] )
+            recTmp, chs_pruned, sci, psp = pruneChannels( recTmp, cfg_preprocess['cfg_prune'] )
+
+            # calculate optical density
+            recTmp["od"] = cedalion.nirs.int2od(recTmp['amp_pruned'])
+            recTmp["od_o"] = cedalion.nirs.int2od(recTmp['amp'])
+            
+
+            # Calculate gvtd
+            recTmp.aux_ts["gvtd"], _ = quality.gvtd(recTmp['amp_pruned'])
+
+        
             # Get the slope of 'od' before motion correction and any bandpass filtering
             foo = recTmp['od'].copy()
             foo = foo.pint.dequantify()
@@ -94,9 +92,13 @@ def load_and_preprocess( rootDir_data = None, subj_ids = None, file_ids = None, 
             slope_base = slope_base.assign_coords(channel = recTmp['od'].channel)
             slope_base = slope_base.assign_coords(wavelength = recTmp['od'].wavelength)
 
+
+            # FIXME: could have dictionary slope['base'], slope['tddr'], slope['splineSG'] etc
+
+
             # Spline SG
-            if flag_do_splineSG:
-                recTmp, slope = motionCorrect_SplineSG( recTmp, fmin, fmax )
+            if cfg_preprocess['cfg_motion_correct']['flag_do_splineSG']:
+                recTmp, slope = motionCorrect_SplineSG( recTmp, cfg_preprocess['cfg_bandpass'] )
             else:
                 slope = None
 
@@ -104,20 +106,27 @@ def load_and_preprocess( rootDir_data = None, subj_ids = None, file_ids = None, 
             recTmp['od_tddr'] = motion_correct.tddr( recTmp['od'] )
             recTmp['od_o_tddr'] = motion_correct.tddr( recTmp['od_o'] )
 
+
             # Get slopes after TDDR before bandpass filtering
             slope_tddr = recTmp['od_tddr'].polyfit(dim='time', deg=1).sel(degree=1)
             slope_tddr = slope_tddr.rename({"polyfit_coefficients": "slope"})
             slope_tddr = slope_tddr.assign_coords(channel = recTmp['od_tddr'].channel)
             slope_tddr = slope_tddr.assign_coords(wavelength = recTmp['od_tddr'].wavelength)
 
+
             # GVTD for TDDR before bandpass filtering
             amp_tddr = recTmp['od_tddr'].copy()
             amp_tddr.values = np.exp(-amp_tddr.values)
             recTmp.aux_ts['gvtd_tddr'], _ = quality.gvtd(amp_tddr)
+            
+            
 
             # bandpass filter od_tddr
+            fmin = cfg_preprocess['cfg_bandpass']['fmin']
+            fmax = cfg_preprocess['cfg_bandpass']['fmax']
             recTmp['od_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_tddr'], fmin, fmax)
             recTmp['od_o_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_o_tddr'], fmin, fmax)
+
 
             # SplineSG Conc
             dpf = xr.DataArray(
@@ -125,31 +134,30 @@ def load_and_preprocess( rootDir_data = None, subj_ids = None, file_ids = None, 
                 dims="wavelength",
                 coords={"wavelength": recTmp['amp'].wavelength},
             )
-            if flag_do_splineSG:
+            if cfg_preprocess['cfg_motion_correct']['flag_do_splineSG']:
                 recTmp['conc_splineSG'] = cedalion.nirs.od2conc(recTmp['od_splineSG'], recTmp.geo3d, dpf, spectrum="prahl")
 
             # TDDR Conc
             recTmp['conc_tddr'] = cedalion.nirs.od2conc(recTmp['od_tddr'], recTmp.geo3d, dpf, spectrum="prahl")
             recTmp['conc_o_tddr'] = cedalion.nirs.od2conc(recTmp['od_o_tddr'], recTmp.geo3d, dpf, spectrum="prahl")
 
-
-
             #
             # Plot DQRs
             #
             lambda0 = recTmp['amp_pruned'].wavelength[0].wavelength.values
             lambda1 = recTmp['amp_pruned'].wavelength[1].wavelength.values
-            snr0, _ = quality.snr(recTmp['amp_pruned'].sel(wavelength=lambda0), snr_thresh)
-            snr1, _ = quality.snr(recTmp['amp_pruned'].sel(wavelength=lambda1), snr_thresh)
+            snr0, _ = quality.snr(recTmp['amp_pruned'].sel(wavelength=lambda0), cfg_preprocess['cfg_prune']['snr_thresh'])
+            snr1, _ = quality.snr(recTmp['amp_pruned'].sel(wavelength=lambda1), cfg_preprocess['cfg_prune']['snr_thresh'])
 
-            pfDAB_dqr.plotDQR( recTmp, chs_pruned, [slope_base, slope_tddr], filenm, flagSave=True, filepath=rootDir_data, stim_lst_str=stim_lst_str )
+
+            pfDAB_dqr.plotDQR( recTmp, chs_pruned, [slope_base, slope_tddr], filenm, cfg_dataset['root_dir'], cfg_dqr['stim_lst_dqr'] )
 
             # load the sidecar json file 
             if os.path.exists(file_path + '.json'):
                 with open(file_path + '.json') as json_file:
                     file_json = json.load(json_file)
                 if 'dataSDWP_LowHigh' in file_json:
-                    pfDAB_dqr.plotDQR_sidecar(file_json, recTmp, rootDir_data, filenm )
+                    pfDAB_dqr.plotDQR_sidecar(file_json, recTmp, cfg_dataset['root_dir'], filenm )
 
             snr0 = np.nanmedian(snr0.values)
             snr1 = np.nanmedian(snr1.values)
@@ -194,12 +202,12 @@ def load_and_preprocess( rootDir_data = None, subj_ids = None, file_ids = None, 
     # End of subject loop
 
     # plot the group DQR
-    pfDAB_dqr.plot_group_dqr( n_subjects, n_files_per_subject, chs_pruned_subjs, slope_base_subjs, slope_tddr_subjs, gvtd_tddr_subjs, snr0_subjs, snr1_subjs, subj_ids, rec, rootDir_data, flag_plot=False )
+    pfDAB_dqr.plot_group_dqr( n_subjects, n_files_per_subject, chs_pruned_subjs, slope_base_subjs, slope_tddr_subjs, gvtd_tddr_subjs, snr0_subjs, snr1_subjs, cfg_dataset['subj_ids'], rec, cfg_dataset['root_dir'], flag_plot=False )
 
-    return rec, filenm_lst, chs_pruned_subjs
+    return rec, chs_pruned_subjs
 
 
-def preprocess(rec = None):
+def preprocess(rec, median_filt ):
 
     # replace negative values and NaNs with a small positive value
     rec['amp'] = rec['amp'].where( rec['amp']>0, 1e-18 ) 
@@ -212,19 +220,24 @@ def preprocess(rec = None):
     rec['amp'][indices[0],1,0] = rec['amp'][indices[0],1,1]
 
     # apply a median filter to rec['amp'] along the time dimension
-    # FIXME: this is to handle spikes that arise from the 1e-18 values inserted above or from other causes, but this is an effective LPF
+    # FIXME: this is to handle spikes that arise from the 1e-18 values inserted above or from other causes, 
+    #        but this is an effective LPF. TDDR may handle this
     # Pad the data before applying the median filter
     pad_width = 1  # Adjust based on the kernel size
     padded_amp = rec['amp'].pad(time=(pad_width, pad_width), mode='edge')
     # Apply the median filter to the padded data
-    filtered_padded_amp = padded_amp.rolling(time=3, center=True).reduce(np.median)
+    filtered_padded_amp = padded_amp.rolling(time=median_filt, center=True).reduce(np.median)
     # Trim the padding after applying the filter
     rec['amp'] = filtered_padded_amp.isel(time=slice(pad_width, -pad_width))
 
     return rec
 
 
-def pruneChannels( rec = None, snr_thresh = 5, sd_threshs = [1, 45]*units.mm, amp_threshs = [1e-5, 0.89] ):
+def pruneChannels( rec, cfg_prune ):
+
+    amp_threshs = cfg_prune['amp_threshs']
+    snr_thresh = cfg_prune['snr_thresh']
+    sd_threshs = cfg_prune['sd_threshs']
 
     amp_threshs_sat = [0., amp_threshs[1]]
     amp_threshs_low = [amp_threshs[0], 1]
@@ -270,11 +283,10 @@ def pruneChannels( rec = None, snr_thresh = 5, sd_threshs = [1, 45]*units.mm, am
 
 
 
-    perc_time_clean_thresh = 0.6
-    sci_threshold = 0.6
-    psp_threshold = 0.1
-
-    window_length = 5 * units.s
+    perc_time_clean_thresh = cfg_prune['perc_time_clean_thresh']
+    sci_threshold = cfg_prune['sci_threshold']
+    psp_threshold = cfg_prune['psp_threshold']
+    window_length = cfg_prune['window_length']
 
     # Here we can assess the scalp coupling index (SCI) of the channels
     sci, sci_mask = quality.sci(rec['amp_pruned'], window_length, sci_threshold)
@@ -283,9 +295,14 @@ def pruneChannels( rec = None, snr_thresh = 5, sd_threshs = [1, 45]*units.mm, am
     psp, psp_mask = quality.psp(rec['amp_pruned'], window_length, psp_threshold)
 
     # create a mask based on SCI or PSP or BOTH
-    sci_x_psp_mask = sci_mask
-    # sci_x_psp_mask = psp_mask
-    # sci_x_psp_mask = sci_mask & psp_mask
+    if cfg_prune['flag_use_sci'] and cfg_prune['flag_use_psp']:
+        sci_x_psp_mask = sci_mask & psp_mask
+    elif cfg_prune['flag_use_sci']:
+        sci_x_psp_mask = sci_mask
+    elif cfg_prune['flag_use_psp']:
+        sci_x_psp_mask = psp_mask
+    else:
+        return rec, chs_pruned, sci, psp
 
     perc_time_clean = sci_x_psp_mask.sum(dim="time") / len(sci.time)
     perc_time_mask = xrutils.mask(perc_time_clean, True)
@@ -307,25 +324,16 @@ def pruneChannels( rec = None, snr_thresh = 5, sd_threshs = [1, 45]*units.mm, am
 
 
 
-def ODandGVTD( rec = None ):
-
-    # calculate optical density
-    rec["od"] = cedalion.nirs.int2od(rec['amp_pruned'])
-    rec["od_o"] = cedalion.nirs.int2od(rec['amp'])
-
-    # # get sample frequency of the data
-    # fs = frequency.sampling_rate(rec["od"])
-
-    # Calculate gvtd
-    rec.aux_ts["gvtd"], _ = quality.gvtd(rec['amp_pruned'])
-    # rec.aux_ts["gvtd"] = rec.aux_ts["gvtd"] * fs # convert to OD per second units
-
-    return rec
 
 
 
-def motionCorrect_SplineSG( rec = None, fmin = 0.02 * units.Hz, fmax = 3 * units.Hz ):
+def motionCorrect_SplineSG( rec, cfg_bandpass ):
     
+    # FIXME: need to pass cfg_motion_correct and consider spline only and any other spline or splineSG params
+
+    fmin = cfg_bandpass['fmin']
+    fmax = cfg_bandpass['fmax']
+
     if 0: # do just the Spline correct
         M = quality.detect_outliers(rec['od'], 1 * units.s)
 

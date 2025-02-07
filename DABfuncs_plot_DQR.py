@@ -23,7 +23,7 @@ from scipy import stats
 
 
 
-def plotDQR( rec = None, chs_pruned = None, slope = None, filenm = None, flagSave = False, filepath = None, stim_lst_str = None ):
+def plotDQR( rec = None, chs_pruned = None, slope = None, filenm = None, filepath = None, stim_lst_str = None ):
 
     f, ax = p.subplots(3, 2, figsize=(11, 14))
 
@@ -145,22 +145,21 @@ def plotDQR( rec = None, chs_pruned = None, slope = None, filenm = None, flagSav
     # give a title to the figure
     p.suptitle(filenm)
 
-    if flagSave:
-        p.savefig( os.path.join(filepath, 'derivatives', 'plots', filenm + "_DQR.png") )
-        p.close()
+    p.savefig( os.path.join(filepath, 'derivatives', 'plots', filenm + "_DQR.png") )
+    p.close()
 
-        # Plot the GVTD Histograms
-        #thresh = pfDAB.find_gvtd_thresh(rec[idx_file].aux_ts['gvtd'].values, statType, nStd)
-        thresh = quality.make_gvtd_hist(rec.aux_ts['gvtd'].values, plot_thresh=True, stat_type=quality.gvtd_stat_type.Histogram_Mode, n_std=10)
-        p.suptitle(filenm)
-        p.savefig( os.path.join(filepath, 'derivatives', 'plots', filenm + "_DQR_gvtd_hist.png") )
-        p.close()
+    # Plot the GVTD Histograms
+    #thresh = pfDAB.find_gvtd_thresh(rec[idx_file].aux_ts['gvtd'].values, statType, nStd)
+    thresh = quality.make_gvtd_hist(rec.aux_ts['gvtd'].values, plot_thresh=True, stat_type=quality.gvtd_stat_type.Histogram_Mode, n_std=10)
+    p.suptitle(filenm)
+    p.savefig( os.path.join(filepath, 'derivatives', 'plots', filenm + "_DQR_gvtd_hist.png") )
+    p.close()
 
-        # #thresh = pfDAB.find_gvtd_thresh(rec[idx_file].aux_ts['gvtd_tddr'].values, statType, nStd)
-        thresh_tddr = quality.make_gvtd_hist(rec.aux_ts['gvtd_tddr'].values, plot_thresh=True, stat_type=quality.gvtd_stat_type.Histogram_Mode, n_std=10)
-        p.suptitle(filenm)
-        p.savefig( os.path.join(filepath, 'derivatives', 'plots', filenm + "_DQR_gvtd_hist_tddr.png") )
-        p.close()
+    # #thresh = pfDAB.find_gvtd_thresh(rec[idx_file].aux_ts['gvtd_tddr'].values, statType, nStd)
+    thresh_tddr = quality.make_gvtd_hist(rec.aux_ts['gvtd_tddr'].values, plot_thresh=True, stat_type=quality.gvtd_stat_type.Histogram_Mode, n_std=10)
+    p.suptitle(filenm)
+    p.savefig( os.path.join(filepath, 'derivatives', 'plots', filenm + "_DQR_gvtd_hist_tddr.png") )
+    p.close()
 
 
     return

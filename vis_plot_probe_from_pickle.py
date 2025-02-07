@@ -6,6 +6,7 @@ from tkinter import filedialog
 
 import cedalion.vis.plot_probe as vPlotProbe
 
+#
 # does blockaverage.pkl.gz exist in the current directory?
 if os.path.exists('blockaverage.pkl.gz'):
     with gzip.open('blockaverage.pkl.gz', 'rb') as f:
