@@ -1,3 +1,4 @@
+import cedalion
 import cedalion_parcellation.datasets as datasets
 import cedalion_parcellation.imagereco.forward_model as fw
 import cedalion.io as io
@@ -20,7 +21,7 @@ import tkinter as tk
 from tkinter import filedialog
 
 import sys
-sys.path.append('U:\eng_research_hrc_binauralhearinglab\Sudan\Labs\Sen Lab\Research_projects\Whole_Head_Cocktail_party\Image_recon_Laura')
+
 import spatial_basis_funs_ced as sbf 
 
 
@@ -31,8 +32,12 @@ import spatial_basis_funs_ced as sbf
 def load_Adot( path_to_dataset = None, head_model = 'ICBM152' ):
 
     # Load the sensitivity profile
-    with open(os.path.join(path_to_dataset, 'derivatives', 'fw',  head_model, 'Adot_wParcels.pkl'), 'rb') as f:
-        Adot = pickle.load(f)
+    # with open(os.path.join(path_to_dataset, 'derivatives', 'fw',  head_model, 'Adot_wParcels.pkl'), 'rb') as f:
+    #     Adot = pickle.load(f)
+    
+    file_path = os.path.join(path_to_dataset, head_model, 'Adot_wParcels.pkl')
+    with open(file_path, 'rb') as f:
+        Adot = pickle.load(f) 
         
     #% LOAD HEAD MODEL 
     if head_model == 'ICBM152':
@@ -59,28 +64,62 @@ def load_Adot( path_to_dataset = None, head_model = 'ICBM152' ):
 
 
 
-
-def do_image_recon( hrf_od = None, head = None, Adot = None, C_meas = None, wavelength = [760,850], BRAIN_ONLY = False, SB = False, sb_cfg = None, alpha_spatial_list = [1e-3], alpha_meas_list = [1e-3], file_save = False, file_path = None, trial_type_img = None, W = None ):
-
+def do_image_recon( hrf_od = None, head = None, Adot = None, C_meas = None, wavelength = [760,850], cfg_img_recon = None, trial_type_img = None, save_path = None, W = None, C = None, D = None  ):
+    
+    cfg_sb = cfg_img_recon['cfg_sb']
+    
     print( 'Starting Image Reconstruction')
 
     #
     # prune the data and sensitivity profile
     #
-    od_mag = hrf_od.stack(measurement=('channel', 'wavelength')).sortby('wavelength')
 
+    # FIXME: I am checking both wavelengths since I have to prune both if one is null to get consistency between A_pruned and od_mag_pruned
+    #        We don't have to technically do this, but it is easier. The alternative requires have Adot_pruned for each wavelengths and checking rest of code
+    wav = hrf_od.wavelength.values
     if len(hrf_od.dims) == 2: # not a time series else it is a time series
-        pruning_mask = ~hrf_od.sel(wavelength=850).isnull()
-    else: 
-        pruning_mask = ~hrf_od.sel(wavelength=850, reltime=0).isnull()
-
-    if BRAIN_ONLY:
-        Adot_pruned = Adot[pruning_mask.values, Adot.is_brain.values, :] 
+        pruning_mask = ~(hrf_od.sel(wavelength=wav[0]).isnull() | hrf_od.sel(wavelength=wav[1]).isnull())
+    elif 'reltime' in hrf_od.dims:
+        pruning_mask = ~(hrf_od.sel(wavelength=wav[0], reltime=0).isnull() | hrf_od.sel(wavelength=wav[1], reltime=0).isnull())
     else:
-        Adot_pruned = Adot[pruning_mask.values, :, :]
-        
-    od_mag_pruned = od_mag.dropna('measurement')
+        pruning_mask = ~(hrf_od.sel(wavelength=wav[0]).mean('time').isnull() | hrf_od.sel(wavelength=wav[1]).mean('time').isnull())
 
+    if C_meas is None:
+        if cfg_img_recon['BRAIN_ONLY']:
+            Adot_pruned = Adot[pruning_mask.values, Adot.is_brain.values, :] 
+        else:
+            Adot_pruned = Adot[pruning_mask.values, :, :]
+            
+        # !!! fixed the assumtion that hrf_od was always a time a series.... is this ok tho
+        if len(hrf_od.dims) == 2: # if nto a time series
+            od_mag_pruned = hrf_od[:,pruning_mask.values].stack(measurement=('channel', 'wavelength')).sortby('wavelength')
+        else:   # it is a time series
+            od_mag_pruned = hrf_od[:,pruning_mask.values,:].stack(measurement=('channel', 'wavelength')).sortby('wavelength')   
+        
+        
+        # od_mag = hrf_od.stack(measurement=('channel', 'wavelength')).sortby('wavelength')
+        # od_mag_pruned = od_mag.dropna('measurement')
+        
+    else: # don't prune anything if C_meas is not None as we use C_meas to essentially prune
+          # but we make sure the corresponding elements of C_meas are set to BAD values
+        if cfg_img_recon['BRAIN_ONLY']:
+            Adot_pruned = Adot[:, Adot.is_brain.values, :] 
+        else:
+            Adot_pruned = Adot
+            
+        od_mag_pruned = hrf_od.stack(measurement=('channel', 'wavelength')).sortby('wavelength')    
+        n_chs = hrf_od.channel.size
+        if od_mag_pruned.dims == 2:
+            od_mag_pruned[:,np.where(~pruning_mask.values)[0]] = 0
+            od_mag_pruned[:,np.where(~pruning_mask.values)[0]+n_chs] = 0
+        else:
+            od_mag_pruned[np.where(~pruning_mask.values)[0]] = 0
+            od_mag_pruned[np.where(~pruning_mask.values)[0]+n_chs] = 0
+
+        mse_val_for_bad_data = 1e1  # FIXME: this should be passed here nad to group_avg
+        # FIXME: I assume C_meas is 1D. If it is 2D then I need to do this to the columns and rows
+        C_meas[np.where(~pruning_mask.values)[0]] = mse_val_for_bad_data
+        C_meas[np.where(~pruning_mask.values)[0] + n_chs] = mse_val_for_bad_data
 
     #
     # create the sensitivity matrix for HbO and HbR
@@ -106,15 +145,15 @@ def do_image_recon( hrf_od = None, head = None, Adot = None, C_meas = None, wave
     #
     # spatial basis functions
     #
-    if SB:
-        M = sbf.get_sensitivity_mask(Adot_pruned, sb_cfg['mask_threshold'])
+    if cfg_img_recon['SB']:
+        M = sbf.get_sensitivity_mask(Adot_pruned, cfg_sb['mask_threshold'])
 
-        G = sbf.get_G_matrix(head, 
+        G = sbf.get_G_matrix(head,     # spatial basis functions
                                 M,
-                                sb_cfg['threshold_brain'], 
-                                sb_cfg['threshold_scalp'], 
-                                sb_cfg['sigma_brain'], 
-                                sb_cfg['sigma_scalp']
+                                cfg_sb['threshold_brain'], 
+                                cfg_sb['threshold_scalp'], 
+                                cfg_sb['sigma_brain'], 
+                                cfg_sb['sigma_scalp']
                                 )
         
         nbrain = Adot_pruned.is_brain.sum().values
@@ -136,7 +175,7 @@ def do_image_recon( hrf_od = None, head = None, Adot = None, C_meas = None, wave
         H[:,:nkernels_brain] = A_hbo_brain.values @ G['G_brain'].values.T
         H[:, nkernels_brain+nkernels_scalp:2*nkernels_brain+nkernels_scalp] = A_hbr_brain.values @ G['G_brain'].values.T
         
-        H[:,nkernels_brain:nkernels_brain+nkernels_scalp] = A_hbo_scalp.values @ G['G_scalp'].values.T
+        H[:,nkernels_brain:nkernels_brain+nkernels_scalp] = A_hbo_scalp.values @ G['G_scalp'].values.T   # H projects the sensitivity matrix into the spatial basis space
         H[:,2*nkernels_brain+nkernels_scalp:] = A_hbr_scalp.values @ G['G_scalp'].values.T
 
         H = xr.DataArray(H, dims=("channel", "kernel"))
@@ -150,15 +189,16 @@ def do_image_recon( hrf_od = None, head = None, Adot = None, C_meas = None, wave
 
     # Ensure A is a numpy array
     A = np.array(A)
-    B = np.sum((A ** 2), axis=0)
-    b = B.max()
 
-    for alpha_spatial in alpha_spatial_list:
+    for alpha_spatial in cfg_img_recon['alpha_spatial_list']:
                         
-        if not BRAIN_ONLY and W is None:
+        if not cfg_img_recon['BRAIN_ONLY'] and W is None and C is None and D is None:
 
             print( f'   Doing spatial regularization with alpha_spatial = {alpha_spatial}')
             # GET A_HAT
+            B = np.sum((A ** 2), axis=0)
+            b = B.max()
+
             lambda_spatial = alpha_spatial * b
             
             L = np.sqrt(B + lambda_spatial)
@@ -174,13 +214,15 @@ def do_image_recon( hrf_od = None, head = None, Adot = None, C_meas = None, wave
             
             C = F #A @ (Linv ** 2) @ A.T
             D = Linv**2 @ A.T
+        else:
+            f = max(np.diag(C))
             
-        for alpha_meas in alpha_meas_list:
+        for alpha_meas in cfg_img_recon['alpha_meas_list']:
             
             print(f'   Doing image recon with alpha_meas = {alpha_meas}')
             
 
-            if BRAIN_ONLY and W is None:
+            if cfg_img_recon['BRAIN_ONLY'] and W is None:
                 Adot_stacked = xr.DataArray(A, dims=("flat_channel", "flat_vertex"))
                 W = pseudo_inverse_stacked(Adot_stacked, alpha=alpha_meas)
                 W = W.assign_coords({"chromo" : ("flat_vertex", ["HbO"]*nvertices  + ["HbR"]* nvertices)})
@@ -203,21 +245,29 @@ def do_image_recon( hrf_od = None, head = None, Adot = None, C_meas = None, wave
             
             split = len(X)//2
 
-            if BRAIN_ONLY:
+            if cfg_img_recon['BRAIN_ONLY']:
                 if len(hrf_od.dims) == 2: # not a time series else it is a time series
                     X = xr.DataArray(X, 
                                     dims = ('vertex'),
                                     coords = {'parcel':("vertex",np.concatenate((Adot.coords['parcel'].values, Adot.coords['parcel'].values)))},
                                     )
                 else:
-                    X = xr.DataArray(X, 
-                                    dims = ('vertex', 'reltime'),
-                                    coords = {'parcel':("vertex",np.concatenate((Adot.coords['parcel'].values, Adot.coords['parcel'].values))),
-                                            'reltime': od_mag_pruned.reltime.values},
-                                    )
+                    # FIXME: check if it is 'reltime' or 'time' and assign appropriately
+                    if 'reltime' in hrf_od.dims:
+                        X = xr.DataArray(X, 
+                                        dims = ('vertex', 'reltime'),
+                                        coords = {'parcel':("vertex",np.concatenate((Adot.coords['parcel'].values, Adot.coords['parcel'].values))),
+                                                'reltime': od_mag_pruned.reltime.values},
+                                        )
+                    else:
+                        X = xr.DataArray(X, 
+                                        dims = ('vertex', 'time'),
+                                        coords = {'parcel':("vertex",np.concatenate((Adot.coords['parcel'].values, Adot.coords['parcel'].values))),
+                                                'time': od_mag_pruned.time.values},
+                                        )
                 
             else:
-                if SB:
+                if cfg_img_recon['SB']:
                     X_hbo = X[:split]
                     X_hbr = X[split:]
                     sb_X_brain_hbo = X_hbo[:nkernels_brain]
@@ -254,7 +304,7 @@ def do_image_recon( hrf_od = None, head = None, Adot = None, C_meas = None, wave
                                             'is_brain':('vertex', Adot.coords['is_brain'].values)},
                                     )
                     X = X.set_xindex('parcel')
-                else:                
+                elif 'reltime' in hrf_od.dims:
                     X = xr.DataArray(X,
                                         dims = ('vertex', 'reltime', 'chromo'),
                                         coords = {'chromo': ['HbO', 'HbR'],
@@ -263,16 +313,26 @@ def do_image_recon( hrf_od = None, head = None, Adot = None, C_meas = None, wave
                                                 'reltime': od_mag_pruned.reltime.values},
                                         )
                     X = X.set_xindex("parcel")
-
-
-            # save the results
-            if file_save:
-                if C_meas is None:
-                    filepath = os.path.join(file_path, f'X_{trial_type_img}_alpha_spatial_{alpha_spatial:.0e}_alpha_meas_{alpha_meas:.0e}.pkl.gz')
-                    print(f'   Saving to X_{trial_type_img}_alpha_spatial_{alpha_spatial:.0e}_alpha_meas_{alpha_meas:.0e}.pkl.gz')
                 else:
-                    filepath = os.path.join(file_path, f'X_{trial_type_img}_cov_alpha_spatial_{alpha_spatial:.0e}_alpha_meas_{alpha_meas:.0e}.pkl.gz')
-                    print(f'   Saving to X_{trial_type_img}_cov_alpha_spatial_{alpha_spatial:.0e}_alpha_meas_{alpha_meas:.0e}.pkl.gz')
+                    X = xr.DataArray(X,
+                                        dims = ('vertex', 'time', 'chromo'),
+                                        coords = {'chromo': ['HbO', 'HbR'],
+                                                'parcel': ('vertex',Adot.coords['parcel'].values),
+                                                'is_brain':('vertex', Adot.coords['is_brain'].values),
+                                                'time': od_mag_pruned.time.values},
+                                        )
+                    X = X.set_xindex("parcel")
+
+            
+            # !!! SHOULD we also save W, C, D, C_meas?????
+            # save the results
+            if cfg_img_recon['flag_save_img_results']:
+                if C_meas is None:
+                    filepath = os.path.join(save_path, f'X_{trial_type_img.values}_alpha_spatial_{alpha_spatial:.0e}_alpha_meas_{alpha_meas:.0e}.pkl.gz')
+                    print(f'   Saving to X_{trial_type_img.values}_alpha_spatial_{alpha_spatial:.0e}_alpha_meas_{alpha_meas:.0e}.pkl.gz \n')
+                else:
+                    filepath = os.path.join(save_path, f'X_{trial_type_img.values}_cov_alpha_spatial_{alpha_spatial:.0e}_alpha_meas_{alpha_meas:.0e}.pkl.gz')
+                    print(f'   Saving to X_{trial_type_img.values}_cov_alpha_spatial_{alpha_spatial:.0e}_alpha_meas_{alpha_meas:.0e}.pkl.gz \n')
                 file = gzip.GzipFile(filepath, 'wb')
                 file.write(pickle.dumps([X, alpha_meas, alpha_spatial]))
                 file.close()     
@@ -280,13 +340,61 @@ def do_image_recon( hrf_od = None, head = None, Adot = None, C_meas = None, wave
             # end loop over alpha_meas
         # end loop over alpha_spatial
 
-    C_norm = C / f
-
-    return X, W, C_norm
+    return X, W, C, D
 
 
+def img_noise_tstat(X_grp, W, C_meas):
+    ''' Calculate tstat and image noise of X_grp.
+    
+    Inputs:
+        X_grp : image result of group average done in channel space
+        W : pseudo inverse matrix
+        Cmeas : variance (y_stderr_weighted**2)
+    
+    Outputs:
+        X_noise : image noise
+        X_tstat : iamge t-stat (i.e. CNR)
+    '''
+    
+    # scale columns of W by y_stderr_weighted**2
+    cov_img_tmp = W * np.sqrt(C_meas.values) # W is pseudo inverse  --- diagonal (faster than W C W.T)
+    cov_img_diag = np.nansum(cov_img_tmp**2, axis=1)
 
-def plot_image_recon( X, head, flag_hbx='hbo_brain', view_position='superior' ):
+    nV = X_grp.shape[0]
+    cov_img_diag = np.reshape( cov_img_diag, (2,nV) ).T
+
+    # image noise
+    X_noise = X_grp.copy()
+    X_noise.values = np.sqrt(cov_img_diag)
+    
+    
+    # image t-stat (i.e. CNR)
+    X_tstat = X_grp / np.sqrt(cov_img_diag)
+
+    X_tstat[ np.where(cov_img_diag[:,0]==0)[0], 0 ] = 0
+    X_tstat[ np.where(cov_img_diag[:,1]==0)[0], 1 ] = 0
+    
+    return X_noise, X_tstat
+
+
+
+def save_image_results(X_matrix, X_matrix_name, save_path, trial_type_img, cfg_img_recon):
+    '''Save image result matrices.
+    Inputs:
+        X_matrix : resulat mat you wanna save (i.e. X_noise)
+        X_matrix_name (str) : nam eof matric you are saving
+        
+    '''
+    # !!! NOTE: only saves last elem in alpha lists... what if the list is > 1?
+    filepath = os.path.join(save_path, f'{X_matrix_name}_{trial_type_img.values}_cov_alpha_spatial_{cfg_img_recon["alpha_spatial_list"][-1]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas_list"][-1]:.0e}.pkl.gz')
+    print(f'   Saving to {X_matrix_name}_{trial_type_img.values}_cov_alpha_spatial_{cfg_img_recon["alpha_spatial_list"][-1]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas_list"][-1]:.0e}.pkl.gz \n')
+    file = gzip.GzipFile(filepath, 'wb')
+    file.write(pickle.dumps([X_matrix, cfg_img_recon["alpha_meas_list"][-1], cfg_img_recon["alpha_spatial_list"][-1]]))
+    file.close()  
+    
+
+
+def plot_image_recon( X, head, shape, iax,clim=(0,1), flag_hbx='hbo_brain', view_position='superior', p0 = None, title_str = None, off_screen= True ):
     # pos_names = ['superior', 'left']
 
     #
@@ -302,62 +410,78 @@ def plot_image_recon( X, head, flag_hbx='hbo_brain', view_position='superior' ):
     X_hbo_scalp = X[~X.is_brain.values, 0]
     X_hbr_scalp = X[~X.is_brain.values, 1]
 
-    pos_names = ['superior', 'left', 'right', 'anterior', 'posterior']
+    pos_names = ['superior', 'left', 'right', 'anterior', 'posterior','scale_bar']
     positions = [ 'xy',
-        [(-547.808328867038, 96.55047760772226, 130.5057670434646),
-        (96.98938441628879, 115.4642870176181, 165.68507873066255),
-        (-0.05508155730503299, 0.021062586851317233, 0.9982596803838084)],
-        [(547.808328867038, 96.55047760772226, 130.5057670434646),
-        (96.98938441628879, 115.4642870176181, 165.68507873066255),
-        (-0.05508155730503299, 0.021062586851317233, 0.9982596803838084)],
-        [(100, 1000, 100),
-        (96.98938441628879, 115.4642870176181, 165.68507873066255),
-        (-0.05508155730503299, 0.021062586851317233, 0.9982596803838084)],
-        [(100, -1000, 100),
-        (96.98938441628879, 115.4642870176181, 165.68507873066255),
-        (-0.05508155730503299, 0.021062586851317233, 0.9982596803838084)]
+        [(-400., 96., 130.),
+        (96., 115., 165.),
+        (0,0,1)],
+        [(600, 96., 130.),
+        (96., 115., 165.),
+        (0,0,1)],
+        [(100, 500, 200),
+        (96., 115., 165.),
+        (0,0,1)],
+        [(100, -300, 300),
+        (96., 115., 165.),
+        (0,0,1)],
+        [(100, -300, 300),
+        (96., 115., 165.),
+        (0,0,1)]
     ]
-    clim=(-X_hbo_brain.max(), X_hbo_brain.max())
+    #clim=(-X_hbo_brain.max(), X_hbo_brain.max())
 
     # get index of pos_names that matches view_position
     idx = [i for i, s in enumerate(pos_names) if view_position in s]
 
     pos = positions[idx[0]]
-    p0 = pv.Plotter(shape=(1,1), window_size = [600, 600])
+
+    if p0 is None:
+        p0 = pv.Plotter(shape=(shape[0],shape[1]), window_size = [2000, 1500], off_screen=off_screen)
 #        p.add_text(f"Group average with alpha_meas = {alpha_meas} and alpha_spatial = {alpha_spatial}", position='upper_left', font_size=12, viewport=True)
-    
+
+    p0.subplot(iax[0], iax[1])
+
+    show_scalar_bar = False
+
     if flag_hbx == 'hbo_brain': # hbo brain 
         surf = cdc.VTKSurface.from_trimeshsurface(head.brain)
         surf = pv.wrap(surf.mesh)
-        p0.subplot(0,0)
-        p0.add_mesh(surf, scalars=X_hbo_brain, cmap=custom_cmap, clim=clim, show_scalar_bar=True )
+        clim=(-X_hbo_brain.max(), X_hbo_brain.max())
+        p0.add_mesh(surf, scalars=X_hbo_brain, cmap=custom_cmap, clim=clim, show_scalar_bar=show_scalar_bar, nan_color=(0.9,0.9,0.9), smooth_shading=True )
         p0.camera_position = pos
-        p0.add_text('HbO Brain', position='lower_left', font_size=10)
 
     elif flag_hbx == 'hbr_brain': # hbr brain
         surf = cdc.VTKSurface.from_trimeshsurface(head.brain)
         surf = pv.wrap(surf.mesh)   
-        p0.subplot(0,0)      
-        p0.add_mesh(surf, scalars=X_hbr_brain, cmap=custom_cmap, clim=clim, show_scalar_bar=True )
+        clim=(-X_hbr_brain.max(), X_hbr_brain.max())
+        p0.add_mesh(surf, scalars=X_hbr_brain, cmap=custom_cmap, clim=clim, show_scalar_bar=show_scalar_bar, nan_color=(0.9,0.9,0.9), smooth_shading=True )
         p0.camera_position = pos
-        p0.add_text('HbR Brain', position='lower_left', font_size=10)
 
     elif flag_hbx == 'hbo_scalp': # hbo scalp
         surf = cdc.VTKSurface.from_trimeshsurface(head.scalp)
         surf = pv.wrap(surf.mesh)
-        p0.subplot(0,0)         
-        p0.add_mesh(surf, scalars=X_hbo_scalp, cmap=custom_cmap, clim=clim, show_scalar_bar=True )
+        clim=(-X_hbo_brain.max(), X_hbo_brain.max())
+        p0.add_mesh(surf, scalars=X_hbo_scalp, cmap=custom_cmap, clim=clim, show_scalar_bar=show_scalar_bar, nan_color=(0.9,0.9,0.9), smooth_shading=True )
         p0.camera_position = pos
-        p0.add_text('HbO Scalp', position='lower_left', font_size=10)
 
     elif flag_hbx == 'hbr_scalp': # hbr scalp
         surf = cdc.VTKSurface.from_trimeshsurface(head.scalp)
         surf = pv.wrap(surf.mesh)
-        p0.subplot(0,0)         
-        p0.add_mesh(surf, scalars=X_hbr_scalp, cmap=custom_cmap, clim=clim, show_scalar_bar=True )
+        clim=(-X_hbr_brain.max(), X_hbr_brain.max())
+        p0.add_mesh(surf, scalars=X_hbr_scalp, cmap=custom_cmap, clim=clim, show_scalar_bar=show_scalar_bar, nan_color=(0.9,0.9,0.9), smooth_shading=True )
         p0.camera_position = pos
-        p0.add_text('HbR Scalp', position='lower_left', font_size=10)
 
-    p0.show( )
+    if iax[0] == 1 and iax[1] == 1:
+        p0.clear_actors()
+        p0.add_scalar_bar(title=title_str, vertical=False, position_x=0.1, position_y=0.5,
+                          height=0.1, width=0.8, fmt='%.1e',
+                          label_font_size=24, title_font_size=32 )  # Add it separately
+    else:
+        p0.add_text(view_position, position='lower_left', font_size=10)
+
+    # save pyvista figure
+    # p0.screenshot( os.path.join(root_dir, 'derivatives', 'plots', f'IMG.png') )
+    # p0.close()
 
     return p0
+

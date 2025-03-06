@@ -16,22 +16,50 @@ import pandas as pd
 import json
 
 
-
 # import my own functions from a different directory
 import sys
 import DABfuncs_plot_DQR as pfDAB_dqr
+import DABfuncs_imu_glm_filter as pfDAB_imu
 
-
-
+import pdb
 
 
 def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
+    '''
+    This function will load all the data for the specified subject and file IDs, and preprocess the data.
+    This function will also create several data quality report (DQR) figures that are saved in /derivatives/plots.
+    The function will return the preprocessed data and a list of the filenames that were loaded, both as 
+    two dimensional lists [subj_idx][file_idx].
+    The data is returned as a recording container with the following fields:
+      timeseries - the data matrices with dimensions of ('channel', 'wavelength', 'time') 
+         or ('channel', 'HbO/HbR', 'time') depending on the data type. 
+         The following sub-fields are included:
+            'amp' - the original amplitude data slightly processed to remove negative and NaN values and to 
+               apply a 3 point median filter to remove outliers.
+            'amp_pruned' - the 'amp' data pruned according to the SNR, SD, and amplitude thresholds.
+            'od' - the optical density data
+            'od_tddr' - the optical density data after TDDR motion correction is applied
+            'conc_tddr' - the concentration data obtained from 'od_tddr'
+            'od_splineSG' and 'conc_splineSG' - returned if splineSG motion correction is applied (i.e. flag_do_splineSG=True)
+      stim - the stimulus data with 'onset', 'duration', and 'trial_type' fields and more from the events.tsv files.
+      aux_ts - the auxiliary time series data from the SNIRF files.
+         In addition, the following aux sub-fields are added during pre-processing:
+            'gvtd' - the global variance of the time derivative of the 'od' data.
+            'gvtd_tddr' - the global variance of the time derivative of the 'od_tddr' data.
+    '''
+
 
     # make sure derivatives folders exist
     der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives')
     if not os.path.exists(der_dir):
         os.makedirs(der_dir)
     der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots')
+    if not os.path.exists(der_dir):
+        os.makedirs(der_dir)
+    der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots', 'IMG')
+    if not os.path.exists(der_dir):
+        os.makedirs(der_dir)
+    der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots', 'DQR')
     if not os.path.exists(der_dir):
         os.makedirs(der_dir)
     der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'ica')
@@ -42,15 +70,23 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
         os.makedirs(der_dir)
 
 
-
     n_subjects = len(cfg_dataset['subj_ids'])
     n_files_per_subject = len(cfg_dataset['file_ids'])
 
     # loop over subjects and files
     for subj_idx in range(n_subjects):
         for file_idx in range(n_files_per_subject):
-
+            
             filenm = cfg_dataset['filenm_lst'][subj_idx][file_idx]
+            
+            # if current sub is in subj_id_exclude, don't process this subject and move on
+            # !!! Added bc one sub doesnt have aux data and errored w/ imu_glm  -- is there a better way to screen for this?
+            # !!! if running IWHD & STS, imu_glm would error with STS .... so instead screen for AUX data before running imu glm??
+                # but STS will still have aux data.... how to handle this? 
+                
+            # if any(sub in filenm for sub in cfg_dataset['subj_id_exclude']):    
+            #     print('Skipping processing for excluded subject')
+            #     continue
 
             print( f"Loading {subj_idx+1} of {n_subjects} subjects, {file_idx+1} of {n_files_per_subject} files : {filenm}" )
 
@@ -69,8 +105,11 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
             else:
                 stim_df = pd.read_csv( file_path[:-5] + '_events.tsv', sep='\t' )
                 recTmp.stim = stim_df
-
-            
+                
+            # Check if walking condition exists in rec.stim, if no then sets flag_do_imu_glm to false
+            if not recTmp.stim.isin(["start_walk"]).any().any():
+                cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm'] = False
+                print("No walking condition found in events.tsv. Skipping imu glm filtering step.")
 
             recTmp = preprocess( recTmp, cfg_preprocess['median_filt'] )
             recTmp, chs_pruned, sci, psp = pruneChannels( recTmp, cfg_preprocess['cfg_prune'] )
@@ -79,10 +118,30 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
             recTmp["od"] = cedalion.nirs.int2od(recTmp['amp_pruned'])
             recTmp["od_o"] = cedalion.nirs.int2od(recTmp['amp'])
             
-
             # Calculate gvtd
             recTmp.aux_ts["gvtd"], _ = quality.gvtd(recTmp['amp_pruned'])
-
+            
+            # Walking filter 
+            # check if at least 1 imu value (using ACCEL_X) is non-zero (making sure there is imu data in snirf)
+            if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm'] and np.any(recTmp.aux_ts['ACCEL_X'] != 0): # This might not always work?
+                recTmp["od_imu"] = pfDAB_imu.filterWalking(recTmp, recTmp["od"], cfg_preprocess['cfg_motion_correct']['cfg_imu_glm'], filenm, cfg_dataset['root_dir'])
+                recTmp["od_o_imu"] = pfDAB_imu.filterWalking(recTmp, recTmp["od"], cfg_preprocess['cfg_motion_correct']['cfg_imu_glm'], filenm, cfg_dataset['root_dir'])
+                
+                # Get the slope of 'od' before motion correction and any bandpass filtering
+                foo = recTmp['od_imu'].copy()           # !!! not really using, either plot later or delete?
+                foo = foo.pint.dequantify()
+                slope_base = foo.polyfit(dim='time', deg=1).sel(degree=1)
+                slope_base = slope_base.rename({"polyfit_coefficients": "slope"})
+                slope_base = slope_base.assign_coords(channel = recTmp['od_imu'].channel)
+                slope_base = slope_base.assign_coords(wavelength = recTmp['od_imu'].wavelength)
+                
+                foo = recTmp['od_o_imu'].copy()
+                foo = foo.pint.dequantify()
+                slope_base = foo.polyfit(dim='time', deg=1).sel(degree=1)
+                slope_base = slope_base.rename({"polyfit_coefficients": "slope"})
+                slope_base = slope_base.assign_coords(channel = recTmp['od_o_imu'].channel)
+                slope_base = slope_base.assign_coords(wavelength = recTmp['od_o_imu'].wavelength)
+        
         
             # Get the slope of 'od' before motion correction and any bandpass filtering
             foo = recTmp['od'].copy()
@@ -91,7 +150,6 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
             slope_base = slope_base.rename({"polyfit_coefficients": "slope"})
             slope_base = slope_base.assign_coords(channel = recTmp['od'].channel)
             slope_base = slope_base.assign_coords(wavelength = recTmp['od'].wavelength)
-
 
             # FIXME: could have dictionary slope['base'], slope['tddr'], slope['splineSG'] etc
 
@@ -105,7 +163,11 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
             # TDDR
             recTmp['od_tddr'] = motion_correct.tddr( recTmp['od'] )
             recTmp['od_o_tddr'] = motion_correct.tddr( recTmp['od_o'] )
-
+            
+            if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm'] and np.any(recTmp.aux_ts['ACCEL_X'] != 0):
+                recTmp['od_imu_tddr'] = motion_correct.tddr( recTmp['od_imu'] )
+                recTmp['od_o_imu_tddr'] = motion_correct.tddr( recTmp['od_o_imu'] )
+                
 
             # Get slopes after TDDR before bandpass filtering
             slope_tddr = recTmp['od_tddr'].polyfit(dim='time', deg=1).sel(degree=1)
@@ -120,12 +182,15 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
             recTmp.aux_ts['gvtd_tddr'], _ = quality.gvtd(amp_tddr)
             
             
-
             # bandpass filter od_tddr
             fmin = cfg_preprocess['cfg_bandpass']['fmin']
             fmax = cfg_preprocess['cfg_bandpass']['fmax']
             recTmp['od_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_tddr'], fmin, fmax)
             recTmp['od_o_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_o_tddr'], fmin, fmax)
+            
+            if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm'] and np.any(recTmp.aux_ts['ACCEL_X'] != 0):
+                recTmp['od_imu_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_imu_tddr'], fmin, fmax)
+                recTmp['od_o_imu_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_o_imu_tddr'], fmin, fmax)
 
 
             # SplineSG Conc
@@ -140,6 +205,12 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
             # TDDR Conc
             recTmp['conc_tddr'] = cedalion.nirs.od2conc(recTmp['od_tddr'], recTmp.geo3d, dpf, spectrum="prahl")
             recTmp['conc_o_tddr'] = cedalion.nirs.od2conc(recTmp['od_o_tddr'], recTmp.geo3d, dpf, spectrum="prahl")
+
+            # filtered walking conc
+            if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm'] and np.any(recTmp.aux_ts['ACCEL_X'] != 0):
+                recTmp['conc_imu_tddr'] = cedalion.nirs.od2conc(recTmp['od_imu_tddr'], recTmp.geo3d, dpf, spectrum="prahl")
+                recTmp['conc_o_imu_tddr'] = cedalion.nirs.od2conc(recTmp['od_o_imu_tddr'], recTmp.geo3d, dpf, spectrum="prahl")
+
 
             #
             # Plot DQRs
@@ -234,6 +305,9 @@ def preprocess(rec, median_filt ):
 
 
 def pruneChannels( rec, cfg_prune ):
+    ''' Function that prunes channels based on cfg params.
+        *Pruned channels are not dropped, instead they are set to NaN 
+        '''
 
     amp_threshs = cfg_prune['amp_threshs']
     snr_thresh = cfg_prune['snr_thresh']

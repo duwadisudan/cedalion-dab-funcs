@@ -16,6 +16,12 @@ import pyvista as pv
 from matplotlib.colors import ListedColormap
 
 
+flag_choose_file = 0
+
+path2results = "/projectnb/nphfnirs/ns/Shannon/Data/Interactive_Walking_HD/derivatives/processed_data/"
+
+fileName = "X_ST-o_cov_alpha_spatial_1e-01_alpha_meas_1e+00.pkl.gz"
+
 #
 #  Load the image recon results
 #
@@ -23,7 +29,7 @@ if os.path.exists('image_results.pkl.gz'):
     with gzip.open('image_results.pkl.gz', 'rb') as f:
         X, alpha_meas, alpha_spatial  = pickle.load(f)
 
-else:
+elif flag_choose_file:
 
     # set initialdir to current directory
     initialdir = os.getcwd()
@@ -38,15 +44,18 @@ else:
         title='Select a data file',
         filetypes=(('gZip files', '*.gz'), ('Pickle files', '*.pkl'), ('All files', '*.*'))
     )
-
     # Check if a file was selected
     if file_path:
         with gzip.open(file_path, 'rb') as f:
             X, alpha_meas, alpha_spatial  = pickle.load(f)
-
     else:
         print("No file selected.")
         quit()
+        
+else:        # open file by name and loc
+    filepath = os.path.join(path2results, fileName)
+    with gzip.open(filepath, 'rb') as f:
+        X, alpha_meas, alpha_spatial  = pickle.load(f)
 
 
 
@@ -56,13 +65,19 @@ else:
 #%% load in head model and sensitivity profile 
 
 # root directory
-rootDir_data = 'U:\\eng_research_hrc_binauralhearinglab\\Sudan\\Labs\\Sen Lab\\Research_projects\\Whole_Head_Cocktail_party\\Cocktail_party_whole_head_master_data\\'
+#rootDir_data = '/Users/dboas/Documents/People/2024/BoasDavid/NN22_Data/Datasets/BallSqueezing_WHHD/'
+probe_dir = "/projectnb/nphfnirs/ns/lcarlton/DATA/probes/NN22_WHHD/12NN/fw/"
 
 head_model = 'ICBM152'
 
 # Load the sensitivity profile
-with open(os.path.join(rootDir_data, 'derivatives', 'fw',  head_model, 'Adot_wParcels.pkl'), 'rb') as f:
-    Adot = pickle.load(f)
+# with open(os.path.join(rootDir_data, 'derivatives', 'fw',  head_model, 'Adot_wParcels.pkl'), 'rb') as f:
+#     Adot = pickle.load(f)
+    
+with open(probe_dir + head_model + '/Adot_wParcels.pkl', 'rb') as f:
+    Adot = pickle.load(f) 
+    
+    
     
 # recordings = io.read_snirf(probe_path + 'fullhead_56x144_System1.snirf')
 # rec = recordings[0]
@@ -121,10 +136,7 @@ positions = [ 'xy',
     (-0.05508155730503299, 0.021062586851317233, 0.9982596803838084)]
 ]
 pos_names = ['superior'] #['superior', 'left']
-
-# clim=(-np.max(X_hbo_brain), np.max(X_hbo_brain))
-
-clim=(-np.percentile(X_hbo_brain, 99), np.percentile(X_hbo_brain, 99))
+clim=(-X_hbo_brain.max(), X_hbo_brain.max())
 
 print('before the loop')
 for name, camera_position in zip(pos_names, positions):
@@ -179,5 +191,3 @@ for name, camera_position in zip(pos_names, positions):
 
 print('done')
 
-
-# %%
