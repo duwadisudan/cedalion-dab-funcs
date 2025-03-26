@@ -8,7 +8,7 @@ import cedalion.vis.plot_probe as vPlotProbe
 
 #%%
 
-flag_choose_file = 0
+flag_choose_file = 1
 
 path2results = "/projectnb/nphfnirs/ns/Shannon/Data/Interactive_Walking_HD/derivatives/processed_data/"
 
@@ -39,15 +39,15 @@ elif flag_choose_file:
     # Check if a file was selected
     if file_path:
         with gzip.open(file_path, 'rb') as f:
-            blockaverage_all, geo2d, geo3d  = pickle.load(f)
+            groupavg_results  = pickle.load(f)
 
-        vPlotProbe.run_vis(blockaverage = blockaverage_all, geo2d = geo2d, geo3d = geo3d)
+        vPlotProbe.run_vis(blockaverage = groupavg_results['blockaverage'], geo2d = groupavg_results['geo2d'], geo3d = groupavg_results['geo3d'])
     else:
         print("No file selected.")
 
 
 else:        # open file by name and loc
-    filepath = os.path.join(path2results, fileName)
+    file_path = os.path.join(path2results, fileName)
     with gzip.open(file_path, 'rb') as f:
         blockaverage_all, geo2d, geo3d  = pickle.load(f)
 

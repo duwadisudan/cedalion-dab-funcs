@@ -87,7 +87,7 @@ def get_group_avg_for_diff_conds(rec, rec_str_lst, flag_save_weighted, chs_prune
 def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg ):
     
     # choose correct mse values 
-    if 'chromo' in rec[0][0][rec_str]:
+    if 'chromo' in rec[0][0][rec_str].dims:
         cfg_mse = cfg_blockavg['cfg_mse_conc']
     else:
         cfg_mse = cfg_blockavg['cfg_mse_od']
@@ -125,22 +125,22 @@ def run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_bl
             # select the stim for the given file
             stim = rec[subj_idx][file_idx].stim.copy()
             
-            # GLM filtering step
-            if 'chromo' in conc_filt.dims and cfg_blockavg['flag_do_GLM_filter']:
-                rec_glm = GLM(rec[subj_idx][file_idx], rec_str, cfg_blockavg['trange_hrf'][0], cfg_blockavg['trange_hrf'][1], cfg_GLM)
-                conc_filt = rec_glm[rec_str]
+            # # GLM filtering step
+            # if 'chromo' in conc_filt.dims and cfg_blockavg['flag_do_GLM_filter']:
+            #     rec_glm = GLM(rec[subj_idx][file_idx], rec_str, cfg_blockavg['trange_hrf'][0], cfg_blockavg['trange_hrf'][1], cfg_GLM)
+            #     conc_filt = rec_glm[rec_str]
                 
-            # else no GLM filtering:
+            # # else no GLM filtering:
+            # else:
+                
+            # get the epochs
+            # check if conc_filt has dimenstion chromo
+            if 'chromo' in conc_filt.dims:
+                conc_filt = conc_filt.transpose('chromo', 'channel', 'time')
             else:
-                
-                # get the epochs
-                # check if conc_filt has dimenstion chromo
-                if 'chromo' in conc_filt.dims:
-                    conc_filt = conc_filt.transpose('chromo', 'channel', 'time')
-                else:
-                    conc_filt = conc_filt.transpose('wavelength', 'channel', 'time')
-                conc_filt = conc_filt.assign_coords(samples=('time', np.arange(len(conc_filt.time))))
-                conc_filt['time'] = conc_filt.time.pint.quantify(units.s)     
+                conc_filt = conc_filt.transpose('wavelength', 'channel', 'time')
+            conc_filt = conc_filt.assign_coords(samples=('time', np.arange(len(conc_filt.time))))
+            conc_filt['time'] = conc_filt.time.pint.quantify(units.s)     
 
             #
             # block average

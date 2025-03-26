@@ -20,7 +20,6 @@ from scipy.spatial.distance import squareform
 from sklearn.decomposition import PCA
 from cedalion.sigdecomp.ERBM import ERBM
 from scipy import stats
-
 from scipy.signal import filtfilt
 from scipy.signal.windows import gaussian
 
@@ -35,10 +34,15 @@ def plotDQR( rec = None, chs_pruned = None, slope = None, filenm = None, filepat
     ax[0][0].plot( rec.aux_ts["gvtd"].time, rec.aux_ts["gvtd_tddr"], color='#ff4500', label="GVTD TDDR")
     ax[0][0].set_xlabel("time / s")
     ax[0][0].set_title(f"{filenm}")
-    thresh = quality._get_gvtd_threshold(rec.aux_ts['gvtd'].values, quality.stat_type.Histogram_Mode, n_std = 10)
-    ax[0][0].axhline(thresh, color='b', linestyle='--', label=f'Thresh {thresh:.1e}')
-    thresh_tddr = quality._get_gvtd_threshold(rec.aux_ts['gvtd_tddr'].values, quality.gvtd_stat_type.Histogram_Mode, n_std = 10)
-    ax[0][0].axhline(thresh_tddr, color='#ff4500', linestyle='--', label=f'Thresh {thresh_tddr:.1e}')
+    #thresh = quality._get_gvtd_threshold(rec.aux_ts['gvtd'].values, quality.gvtd_stat_type.Histogram_Mode, n_std = 10)
+    thresh = quality._get_gvtd_threshold(rec.aux_ts['gvtd'], 'histogram_mode', n_std = 10)
+    #thresh = quality._get_gvtd_threshold(rec.aux_ts['gvtd'].values, 'histogram_mode', n_std = 10)
+    ax[0][0].axhline(thresh.values, color='b', linestyle='--', label=f'Thresh {thresh:.1e}')
+    #thresh_tddr = quality._get_gvtd_threshold(rec.aux_ts['gvtd_tddr'].values, quality.gvtd_stat_type.Histogram_Mode, n_std = 10)
+    thresh_tddr = quality._get_gvtd_threshold(rec.aux_ts['gvtd_tddr'], 'histogram_mode', n_std = 10)
+    #thresh_tddr = quality._get_gvtd_threshold(rec.aux_ts['gvtd_tddr'].values, 'histogram_mode', n_std = 10)
+
+    ax[0][0].axhline(thresh_tddr.values, color='#ff4500', linestyle='--', label=f'Thresh {thresh_tddr:.1e}')
     ax[0][0].legend()
 
     stim = rec.stim.copy()
@@ -153,19 +157,80 @@ def plotDQR( rec = None, chs_pruned = None, slope = None, filenm = None, filepat
 
     # Plot the GVTD Histograms
     #thresh = pfDAB.find_gvtd_thresh(rec[idx_file].aux_ts['gvtd'].values, statType, nStd)
-    thresh = quality.make_gvtd_hist(rec.aux_ts['gvtd'].values, plot_thresh=True, stat_type=quality.gvtd_stat_type.Histogram_Mode, n_std=10)
+    thresh = make_gvtd_hist(rec.aux_ts['gvtd'], plot_thresh=True, stat_type='histogram_mode', n_std=10) # !!! why recalc thresh? do we need to?
     p.suptitle(filenm)
     p.savefig( os.path.join(filepath, 'derivatives', 'plots', 'DQR', filenm + "_DQR_gvtd_hist.png") )
     p.close()
 
     # #thresh = pfDAB.find_gvtd_thresh(rec[idx_file].aux_ts['gvtd_tddr'].values, statType, nStd)
-    thresh_tddr = quality.make_gvtd_hist(rec.aux_ts['gvtd_tddr'].values, plot_thresh=True, stat_type=quality.gvtd_stat_type.Histogram_Mode, n_std=10)
+    thresh_tddr = make_gvtd_hist(rec.aux_ts['gvtd_tddr'], plot_thresh=True, stat_type='histogram_mode', n_std=10)
     p.suptitle(filenm)
     p.savefig( os.path.join(filepath, 'derivatives', 'plots', 'DQR', filenm + "_DQR_gvtd_hist_tddr.png") )
     p.close()
 
 
     return
+
+
+def make_gvtd_hist(gvtd_time_trace, plot_thresh=True, stat_type=None, n_std=None, 
+                   bin_size=None):
+    """Generate a histogram of GVTD values and optionally overlay a threshold line.
+
+    Code from:
+    https://github.com/sherafatia/GVTD
+    Sherafati, A., Snyder, A. Z., Eggebrecht, A. T., Bergonzi, K. M., Burns-Yocum,
+    T. M., Lugar, H. M., Ferradal, S. L., Robichaux-Viehoever, A., Smyser, C. D.,
+    Palanca, B. J., Hershey, T. & Culver, J. P. Global motion detection and censoring
+    in high-density diffuse optical tomography. Hum. Brain Mapp. 41, 4093?4112 (2020).
+    converted from matlab by chatGPT
+
+    Args:
+        gvtd_time_trace (array-like): GVTD time trace (1D array).
+        plot_thresh (bool): Whether to plot the threshold on the histogram. Default is
+            True.
+        stat_type (str): Statistic type for threshold calculation (e.g., from StatType).
+            Default is Histogram_Mode.
+        n_std (int or float): Number of standard deviations for threshold calculation.
+            Default is 4.
+        bin_size (float): Size of histogram bins. If None, it's calculated based on
+            data.
+
+    Returns:
+        float: Calculated threshold value if `plot_thresh` is True; otherwise, None.
+    """
+    # Set default values
+    if stat_type is None:
+        stat_type = 'histogram_mode'
+    if plot_thresh is None:
+        plot_thresh = True
+    if n_std is None and plot_thresh:
+        n_std = 4
+
+    # Calculate bin size if not provided
+    if bin_size is None:
+        min_counts_each_bin = 5
+        n_bins = round(len(gvtd_time_trace) / min_counts_each_bin)
+        bin_size = np.max(gvtd_time_trace) / n_bins
+
+    f, ax = p.subplots(1, 1, figsize=(7, 5))
+
+    # Create the histogram
+    bins = np.arange(0, np.max(gvtd_time_trace) + bin_size, bin_size)
+    ax.hist(gvtd_time_trace, bins=bins, edgecolor='black', alpha=0.75)
+    ax.set_title('GVTD Histogram')
+    ax.set_xlabel('GVTD')
+    ax.set_ylabel('Counts')
+
+    threshold = None
+    if plot_thresh:
+        # Calculate the threshold
+        threshold = quality._get_gvtd_threshold(gvtd_time_trace, stat_type, n_std)
+
+        # Plot the threshold line
+        ax.axvline(threshold.values, color='red', linestyle='--', label=f'Threshold: {threshold:.4f}')
+        ax.legend()
+
+    return threshold
 
 
 def plotDQR_sidecar(file_json, rec, filepath, filenm):

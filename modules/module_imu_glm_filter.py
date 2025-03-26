@@ -43,11 +43,11 @@ import pdb
 
 #%%
 
-def filterWalking(rec, dod, cfg_imu_glm, filenm = None, filepath = None):
+def filterWalking(rec, rec_str, cfg_imu_glm, filenm = None, filepath = None):
     ''' Filter Walking portion of the data in dOD space 
         inputs: 
             rec - xarray 
-            dod - xarray from rec variable before any motion correction (rec["od_pruned"])
+            rec_str - timeseries name you want to filter
             cfg_imu_glm - params 
             filenm - 
             filepath - 
@@ -56,6 +56,7 @@ def filterWalking(rec, dod, cfg_imu_glm, filenm = None, filepath = None):
             dod_filtered - xarray containing filtered dOD data
     '''
     
+    dod = rec[rec_str]
     
     # vals needd
     t = np.array(rec["amp"].time)

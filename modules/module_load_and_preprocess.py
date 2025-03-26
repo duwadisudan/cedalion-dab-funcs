@@ -5,6 +5,7 @@ import cedalion.sigproc.quality as quality
 import cedalion.sigproc.frequency as frequency
 import cedalion.sigproc.motion_correct as motion_correct
 import cedalion.xrutils as xrutils
+import cedalion.models.glm as glm
 import cedalion.datasets as datasets
 import xarray as xr
 import matplotlib.pyplot as p
@@ -56,9 +57,6 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
     der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots')
     if not os.path.exists(der_dir):
         os.makedirs(der_dir)
-    der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots', 'IMG')
-    if not os.path.exists(der_dir):
-        os.makedirs(der_dir)
     der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots', 'DQR')
     if not os.path.exists(der_dir):
         os.makedirs(der_dir)
@@ -106,10 +104,19 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
                 stim_df = pd.read_csv( file_path[:-5] + '_events.tsv', sep='\t' )
                 recTmp.stim = stim_df
                 
-            # Check if walking condition exists in rec.stim, if no then sets flag_do_imu_glm to false
-            if not recTmp.stim.isin(["start_walk"]).any().any():
-                cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm'] = False
-                print("No walking condition found in events.tsv. Skipping imu glm filtering step.")
+            # Walking filter checks:
+            if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm']:
+                
+                # Check if walking condition exists in rec.stim, if no then sets flag_do_imu_glm to false
+                if not recTmp.stim.isin(["start_walk"]).any().any():
+                    cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm'] = False
+                    print("No walking condition found in events.tsv. Skipping imu glm filtering step.")
+                    
+                 # Check if at least 1 imu value (using ACCEL_X) is non-zero (making sure there is imu data in snirf)
+                if not np.any(recTmp.aux_ts['ACCEL_X'] != 0):   # !!! this might not always work and I'm only checking aux_x
+                    cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm'] = False
+                    print("There is no valid imu data in aux, skipping walking filter")
+
 
             recTmp = preprocess( recTmp, cfg_preprocess['median_filt'] )
             recTmp, chs_pruned, sci, psp = pruneChannels( recTmp, cfg_preprocess['cfg_prune'] )
@@ -122,34 +129,32 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
             recTmp.aux_ts["gvtd"], _ = quality.gvtd(recTmp['amp_pruned'])
             
             # Walking filter 
-            # check if at least 1 imu value (using ACCEL_X) is non-zero (making sure there is imu data in snirf)
-            if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm'] and np.any(recTmp.aux_ts['ACCEL_X'] != 0): # This might not always work?
-                recTmp["od_imu"] = pfDAB_imu.filterWalking(recTmp, recTmp["od"], cfg_preprocess['cfg_motion_correct']['cfg_imu_glm'], filenm, cfg_dataset['root_dir'])
-                recTmp["od_o_imu"] = pfDAB_imu.filterWalking(recTmp, recTmp["od"], cfg_preprocess['cfg_motion_correct']['cfg_imu_glm'], filenm, cfg_dataset['root_dir'])
+            if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm']:     # and np.any(recTmp.aux_ts['ACCEL_X'] != 0): # This might not always work?
+                recTmp["od_imu"] = pfDAB_imu.filterWalking(recTmp, "od", cfg_preprocess['cfg_motion_correct']['cfg_imu_glm'], filenm, cfg_dataset['root_dir'])
+                recTmp["od_o_imu"] = pfDAB_imu.filterWalking(recTmp, "od_o", cfg_preprocess['cfg_motion_correct']['cfg_imu_glm'], filenm, cfg_dataset['root_dir'])
+                
+                # !!! quantify slopes for walking filter and plot?
                 
                 # Get the slope of 'od' before motion correction and any bandpass filtering
-                foo = recTmp['od_imu'].copy()           # !!! not really using, either plot later or delete?
-                foo = foo.pint.dequantify()
-                slope_base = foo.polyfit(dim='time', deg=1).sel(degree=1)
-                slope_base = slope_base.rename({"polyfit_coefficients": "slope"})
-                slope_base = slope_base.assign_coords(channel = recTmp['od_imu'].channel)
-                slope_base = slope_base.assign_coords(wavelength = recTmp['od_imu'].wavelength)
+                # foo = recTmp['od_imu'].copy()           # !!! not really using, either plot later or delete?
+                # foo = foo.pint.dequantify()
+                # slope_base = foo.polyfit(dim='time', deg=1).sel(degree=1)
+                # slope_base = slope_base.rename({"polyfit_coefficients": "slope"})
+                # slope_base = slope_base.assign_coords(channel = recTmp['od_imu'].channel)
+                # slope_base = slope_base.assign_coords(wavelength = recTmp['od_imu'].wavelength)
                 
-                foo = recTmp['od_o_imu'].copy()
-                foo = foo.pint.dequantify()
-                slope_base = foo.polyfit(dim='time', deg=1).sel(degree=1)
-                slope_base = slope_base.rename({"polyfit_coefficients": "slope"})
-                slope_base = slope_base.assign_coords(channel = recTmp['od_o_imu'].channel)
-                slope_base = slope_base.assign_coords(wavelength = recTmp['od_o_imu'].wavelength)
+                slope_imu = quant_slope(recTmp, "od_imu", True)
+                
         
         
             # Get the slope of 'od' before motion correction and any bandpass filtering
-            foo = recTmp['od'].copy()
-            foo = foo.pint.dequantify()
-            slope_base = foo.polyfit(dim='time', deg=1).sel(degree=1)
-            slope_base = slope_base.rename({"polyfit_coefficients": "slope"})
-            slope_base = slope_base.assign_coords(channel = recTmp['od'].channel)
-            slope_base = slope_base.assign_coords(wavelength = recTmp['od'].wavelength)
+            slope_base = quant_slope(recTmp, "od", True)
+            # foo = recTmp['od'].copy()
+            # foo = foo.pint.dequantify()
+            # slope_base = foo.polyfit(dim='time', deg=1).sel(degree=1)
+            # slope_base = slope_base.rename({"polyfit_coefficients": "slope"})
+            # slope_base = slope_base.assign_coords(channel = recTmp['od'].channel)
+            # slope_base = slope_base.assign_coords(wavelength = recTmp['od'].wavelength)
 
             # FIXME: could have dictionary slope['base'], slope['tddr'], slope['splineSG'] etc
 
@@ -164,16 +169,17 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
             recTmp['od_tddr'] = motion_correct.tddr( recTmp['od'] )
             recTmp['od_o_tddr'] = motion_correct.tddr( recTmp['od_o'] )
             
-            if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm'] and np.any(recTmp.aux_ts['ACCEL_X'] != 0):
+            if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm']:
                 recTmp['od_imu_tddr'] = motion_correct.tddr( recTmp['od_imu'] )
                 recTmp['od_o_imu_tddr'] = motion_correct.tddr( recTmp['od_o_imu'] )
                 
 
             # Get slopes after TDDR before bandpass filtering
-            slope_tddr = recTmp['od_tddr'].polyfit(dim='time', deg=1).sel(degree=1)
-            slope_tddr = slope_tddr.rename({"polyfit_coefficients": "slope"})
-            slope_tddr = slope_tddr.assign_coords(channel = recTmp['od_tddr'].channel)
-            slope_tddr = slope_tddr.assign_coords(wavelength = recTmp['od_tddr'].wavelength)
+            slope_tddr = quant_slope(recTmp, "od_tddr", False)
+            # slope_tddr = recTmp['od_tddr'].polyfit(dim='time', deg=1).sel(degree=1)
+            # slope_tddr = slope_tddr.rename({"polyfit_coefficients": "slope"})
+            # slope_tddr = slope_tddr.assign_coords(channel = recTmp['od_tddr'].channel)
+            # slope_tddr = slope_tddr.assign_coords(wavelength = recTmp['od_tddr'].wavelength)
 
 
             # GVTD for TDDR before bandpass filtering
@@ -188,17 +194,18 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
             recTmp['od_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_tddr'], fmin, fmax)
             recTmp['od_o_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_o_tddr'], fmin, fmax)
             
-            if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm'] and np.any(recTmp.aux_ts['ACCEL_X'] != 0):
+            if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm']:
                 recTmp['od_imu_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_imu_tddr'], fmin, fmax)
                 recTmp['od_o_imu_tddr'] = cedalion.sigproc.frequency.freq_filter(recTmp['od_o_imu_tddr'], fmin, fmax)
 
-
-            # SplineSG Conc
+            # Convert OD to Conc
             dpf = xr.DataArray(
                 [1, 1],
                 dims="wavelength",
                 coords={"wavelength": recTmp['amp'].wavelength},
             )
+            
+            # SplineSG Conc
             if cfg_preprocess['cfg_motion_correct']['flag_do_splineSG']:
                 recTmp['conc_splineSG'] = cedalion.nirs.od2conc(recTmp['od_splineSG'], recTmp.geo3d, dpf, spectrum="prahl")
 
@@ -207,11 +214,26 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
             recTmp['conc_o_tddr'] = cedalion.nirs.od2conc(recTmp['od_o_tddr'], recTmp.geo3d, dpf, spectrum="prahl")
 
             # filtered walking conc
-            if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm'] and np.any(recTmp.aux_ts['ACCEL_X'] != 0):
+            if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm']:
                 recTmp['conc_imu_tddr'] = cedalion.nirs.od2conc(recTmp['od_imu_tddr'], recTmp.geo3d, dpf, spectrum="prahl")
                 recTmp['conc_o_imu_tddr'] = cedalion.nirs.od2conc(recTmp['od_o_imu_tddr'], recTmp.geo3d, dpf, spectrum="prahl")
 
-
+            # GLM filtering step
+            if cfg_preprocess['flag_do_GLM_filter']:
+                recTmp = GLM(recTmp, 'conc_tddr', cfg_preprocess['cfg_GLM'])
+                recTmp = GLM(recTmp, 'conc_o_tddr', cfg_preprocess['cfg_GLM'])
+                
+                recTmp['od_tddr_postglm'] = cedalion.nirs.conc2od(recTmp['conc_tddr'], recTmp.geo3d, dpf)  # Convert GLM filtered data back to OD
+                recTmp['od_o_tddr_postglm'] = cedalion.nirs.conc2od(recTmp['conc_o_tddr'], recTmp.geo3d, dpf)
+                
+                if cfg_preprocess['cfg_motion_correct']['flag_do_imu_glm']:
+                    recTmp = GLM(recTmp, 'conc_imu_tddr', cfg_preprocess['cfg_GLM'])
+                    recTmp = GLM(recTmp, 'conc_o_imu_tddr', cfg_preprocess['cfg_GLM'])
+                    
+                    recTmp['od_imu_tddr_postglm'] = cedalion.nirs.conc2od(recTmp['conc_imu_tddr'], recTmp.geo3d, dpf)  # Convert GLM filtered data back to OD
+                    recTmp['od_o_imu_tddr_postglm'] = cedalion.nirs.conc2od(recTmp['conc_o_imu_tddr'], recTmp.geo3d, dpf)
+                              
+            
             #
             # Plot DQRs
             #
@@ -275,6 +297,7 @@ def load_and_preprocess( cfg_dataset, cfg_preprocess, cfg_dqr ):
     # plot the group DQR
     pfDAB_dqr.plot_group_dqr( n_subjects, n_files_per_subject, chs_pruned_subjs, slope_base_subjs, slope_tddr_subjs, gvtd_tddr_subjs, snr0_subjs, snr1_subjs, cfg_dataset['subj_ids'], rec, cfg_dataset['root_dir'], flag_plot=False )
 
+    
     return rec, chs_pruned_subjs
 
 
@@ -397,7 +420,59 @@ def pruneChannels( rec, cfg_prune ):
     return rec, chs_pruned, sci, psp
 
 
+def GLM(rec, rec_str, cfg_GLM):
+    
+    #### build design matrix
+    ts_long, ts_short = cedalion.nirs.split_long_short_channels(
+        rec[rec_str], rec.geo3d, distance_threshold= cfg_GLM['distance_threshold']
+    )
+    
+    # build regressors
+    dm, channel_wise_regressors = glm.make_design_matrix(
+        rec[rec_str],
+        #ts_long,
+        ts_short,
+        rec.stim,
+        rec.geo3d,
+        basis_function = glm.GaussianKernels(cfg_GLM['t_pre'], cfg_GLM['t_post'], cfg_GLM['t_delta'], cfg_GLM['t_std']),
+        drift_order = cfg_GLM['drift_order'],
+        short_channel_method = cfg_GLM['short_channel_method']
+    )
+    
+    #### fit the model 
+    betas = glm.fit(rec[rec_str], dm, channel_wise_regressors, noise_model=cfg_GLM['noise_model'])
+    
+    pred_all = glm.predict(rec[rec_str], betas, dm, channel_wise_regressors)
+    pred_all = pred_all.pint.quantify('micromolar')
+    
+    residual = rec[rec_str] - pred_all
+    
+    # prediction of all HRF regressors, i.e. all regressors that start with 'HRF '
+    pred_hrf = glm.predict(
+                            rec[rec_str],
+                            betas.sel(regressor=betas.regressor.str.startswith("HRF ")),
+                            dm,
+                            channel_wise_regressors
+                        )
+    
+    pred_hrf = pred_hrf.pint.quantify('micromolar')
 
+    # rec['pred_hrf'] = pred_hrf + residual 
+    # #### get average HRF prediction 
+    # rec['pred_hrf'] = rec['pred_hrf'].transpose('chromo', 'channel', 'time')
+    # rec['pred_hrf'] = rec['pred_hrf'].assign_coords(samples=("time", np.arange(len(rec['pred_hrf'].time))))
+    # rec['pred_hrf']['time'] = rec['pred_hrf'].time.pint.quantify(units.s) 
+    
+    
+    rec[rec_str + '_postglm'] = pred_hrf + residual 
+    
+    #### get average HRF prediction 
+    rec[rec_str + '_postglm'] = rec[rec_str + '_postglm'].transpose('chromo', 'channel', 'time')
+    rec[rec_str + '_postglm'] = rec[rec_str + '_postglm'].assign_coords(samples=("time", np.arange(len(rec[rec_str + '_postglm'].time))))
+    rec[rec_str + '_postglm']['time'] = rec[rec_str + '_postglm'].time.pint.quantify(units.s) 
+             
+    
+    return rec
 
 
 
@@ -458,7 +533,18 @@ def Conc( rec = None ):
     return rec
 
 
+def quant_slope(rec, timeseries, dequantify):
+    if dequantify:
+        foo = rec[timeseries].copy()
+        foo = foo.pint.dequantify()
+        slope = foo.polyfit(dim='time', deg=1).sel(degree=1)
+    else:
+        slope = rec[timeseries].polyfit(dim='time', deg=1).sel(degree=1)
+        
+    slope = slope.rename({"polyfit_coefficients": "slope"})
+    slope = slope.assign_coords(channel = rec[timeseries].channel)
+    slope = slope.assign_coords(wavelength = rec[timeseries].wavelength)
 
-
+    return slope
 
 

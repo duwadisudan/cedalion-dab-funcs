@@ -52,7 +52,7 @@ importlib.reload(pfDAB_grp_avg)
 
 flag_load_preprocessed_data = False  # if 1, will skip load_and_preprocess function and use saved data
 rootDir_saveData = '/Users/dboas/Documents/People/2024/BoasDavid/NN22_Data/Datasets/Laura_WMandRest/derivatives/processed_data/'
-flag_save_preprocessed_data = True
+flag_save_preprocessed_data = False
 
 
 cfg_dataset = {
@@ -109,13 +109,25 @@ cfg_bandpass = {
     'fmax' : 3 * units.Hz
 }
 
+cfg_GLM = {
+    'drift_order' : 1,
+    'distance_threshold' : 20*units.mm, # for ssr
+    'short_channel_method' : 'mean',
+    'noise_model' : "ols",
+    't_delta' : 1*units.s ,   # for seq of Gauss basis func - the temporal spacing between consecutive gaussians
+    't_std' : 1*units.s ,     #  the temporal spacing between consecutive gaussians
+    't_pre' : 5*units.s, 
+    't_post' : 33*units.s   # !!! make same as blockaverage???
+    }
+
 cfg_preprocess = {
     'median_filt' : 3, # set to 1 if you don't want to do median filtering
     'cfg_prune' : cfg_prune,
     'cfg_motion_correct' : cfg_motion_correct,
-    'cfg_bandpass' : cfg_bandpass
+    'cfg_bandpass' : cfg_bandpass,
+    'flag_do_GLM_filter' : False,
+    'cfg_GLM' : cfg_GLM 
 }
-
 
 cfg_mse_conc = {
     'mse_val_for_bad_data' : 1e7 * units.micromolar**2, 
@@ -158,6 +170,7 @@ cfg_blockavg = {
 
 cfg_erbmICA = {}
 
+save_path = cfg_dataset['root_dir'] + 'derivatives/processed_data/'
 
 
 # %% Load and preprocess the data
@@ -282,127 +295,239 @@ rec = pfDAB_ERBM.ERBM_run_ica( rec, filenm_lst, flag_ICA_use_pruned_data, ica_lp
 # %% Block Average - unweighted and weighted
 ##############################################################################
 
+
 import importlib
 importlib.reload(pfDAB_grp_avg)
 
+flag_load_blockaveraged_data = False
 
-# FIXME: should not be needed here... shouldbe handled in ICA step above
-ica_lpf = 1.0 * units.Hz # MUST be the same as used when creating W_ica
-# import pdb
-# pdb.set_trace()
-if 1:
-    rec_str = 'conc_tddr'
-    y_mean, y_mean_weighted, y_stderr_weighted, _, _ = pfDAB_grp_avg.run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg)
-    blockaverage_mean = y_mean
+#rec_str_lst = ['od_tddr', 'od_o_tddr', 'od_imu_tddr', 'od_o_imu_tddr']
+rec_str_lst = ['od_tddr', 'od_o_tddr']
+#rec_str_lst = ['conc_tddr', 'conc_o_tddr']
+#rec_str_lst = ['od_tddr_postglm', 'od_o_tddr_postglm', 'od_imu_tddr_postglm', 'od_o_imu_tddr_postglm']
 
-    # rec_str = 'conc_tddr_pca'
-    # y_mean, y_mean_weighted, y_stderr_weighted, _, _ = pfDAB_grp_avg.run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg )
-    # blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-pca' for x in y_mean_weighted.trial_type.values])
-    # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
+rec_str_lst_use_weighted = [False, True]  #, False, True] 
+# !!!  ^^^use for  image recon -> if Cmeas false or true
 
-    # rec_str = 'conc_tddr_ica'
-    # y_mean, y_mean_weighted, y_stderr_weighted, _, _ = pfDAB_grp_avg.run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg )
-    # blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-ica' for x in y_mean_weighted.trial_type.values])
-    # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
+# for saving file name 
+if 'conc' in rec_str_lst[0]:  
+    save_str = 'CONC'
+else:
+    save_str = 'OD'
 
-    # rec_str = 'conc_tddr_glm'
-    # y_mean, y_mean_weighted, y_stderr_weighted, _, _ = pfDAB_grp_avg.run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg )
-    # blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-glm' for x in y_mean_weighted.trial_type.values])
-    # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
+# Compute block average
+if not flag_load_blockaveraged_data:
+    # !!! ADD in function if rec_str_use_weighted_lst is NONE then assume to save weighted for all trial types and for new_lst_use_weighted return NONE
+    # !!! ^^ OR ASSUME SAVE UNWEIGHTED???
+    blockaverage_mean, blockaverage_stderr, blockaverage_subj, blockaverage_mse_subj = pfDAB_grp_avg.get_group_avg_for_diff_conds(rec, 
+                                                                                                                                 rec_str_lst, rec_str_lst_use_weighted,  chs_pruned_subjs, cfg_dataset, cfg_blockavg )
+    # save the results to a pickle file
+    blockaverage = blockaverage_mean
 
-if 0:  # !!! sub 3 has no od_imu --- go back and check preprocess for this sub?????????
-    # rec_str = 'conc_o_tddr' # just doing this because I want the DQR scalp plot for this
-    # y_mean, y_mean_weighted, y_stderr_weighted, _, _ = pfDAB_grp_avg.run_group_block_average( rec, filenm_lst, rec_str, ica_lpf, trange_hrf, stim_lst_hrf, flag_save_each_subj, subj_ids, subj_id_exclude, chs_pruned_subjs, rootDir_data, trange_hrf_stat )
+    # Compute new rec_str_lst_use_weighted
+    new_rec_str_lst_use_weighted = []
+    [new_rec_str_lst_use_weighted .extend([value] * len(cfg_blockavg['stim_lst_hrf'])) for value in rec_str_lst_use_weighted] # Repeat each value for each trial type
 
-    rec_str = 'od_tddr'
-    y_mean, y_mean_weighted, y_stderr_weighted, _, _ = pfDAB_grp_avg.run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg)
-    blockaverage_mean = y_mean
     
-    rec_str = 'od_o_tddr'
-    y_mean, y_mean_weighted, y_stderr_weighted, y_subj, y_mse_subj = pfDAB_grp_avg.run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg )
-    blockaverage_mean_tmp = y_mean_weighted.assign_coords(trial_type=[x + '-o' for x in y_mean_weighted.trial_type.values])
-    blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
+    groupavg_results = {'blockaverage': blockaverage_mean,
+               'blockaverage_stderr': blockaverage_stderr,
+               'blockaverage_subj': blockaverage_subj,
+               'blockaverage_mse_subj': blockaverage_mse_subj,
+               'new_rec_str_lst_use_weighted' : new_rec_str_lst_use_weighted,
+               'geo2d' : rec[0][0].geo2d,
+               'geo3d' : rec[0][0].geo3d
+               }
     
-    # rec_str = 'od_imu_tddr'
-    # y_mean, y_mean_weighted, y_stderr_weighted, y_subj, y_mse_subj = pfDAB_grp_avg.run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg )
-    # blockaverage_mean_tmp = y_mean.assign_coords(trial_type=[x + '-imu' for x in y_mean_weighted.trial_type.values])
-    # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
+    if cfg_blockavg['flag_save_group_avg_hrf']:
+        file_path_pkl = os.path.join(save_path, 'blockaverage_' + cfg_dataset["file_ids"][0].split('_')[0] + '_' + save_str + '.pkl.gz')
+        file = gzip.GzipFile(file_path_pkl, 'wb')
+        file.write(pickle.dumps(groupavg_results))
+        file.close()
+        print('Saved group average HRF to ' + file_path_pkl)
+
+else: # LOAD data
+    filname =  'blockaverage_' + cfg_dataset["file_ids"][0].split('_')[0] + '_' + save_str + '.pkl.gz'
+    filepath_bl = os.path.join(save_path , filname)
     
-    # rec_str = 'od_o_imu_tddr'
-    # y_mean, y_mean_weighted, y_stderr_weighted, y_subj, y_mse_subj = pfDAB_grp_avg.run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg )
-    # blockaverage_mean_tmp = y_mean_weighted.assign_coords(trial_type=[x + '-o-imu' for x in y_mean_weighted.trial_type.values])
-    # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
-
-    # # rec_str = 'od_o_tddr_pca'
-    # # y_mean, y_mean_weighted_pca, y_stderr_weighted_pca, _, y_mse_subj_pca = pfDAB_grp_avg.run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg )
-    # # blockaverage_mean_tmp = y_mean_weighted_pca.assign_coords(trial_type=[x + '-o-pca' for x in y_mean_weighted.trial_type.values])
-    # # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
-
-    # # rec_str = 'od_o_tddr_ica'
-    # # y_mean, y_mean_weighted_ica, y_stderr_weighted_ica, _, y_mse_subj_ica = pfDAB_grp_avg.run_group_block_average( rec, rec_str, chs_pruned_subjs, cfg_dataset, cfg_blockavg )
-    # # blockaverage_mean_tmp = y_mean_weighted_ica.assign_coords(trial_type=[x + '-o-ica' for x in y_mean_weighted.trial_type.values])
-    # # blockaverage_mean = xr.concat([blockaverage_mean, blockaverage_mean_tmp],dim='trial_type')
-
-# save the results to a pickle file
-blockaverage = blockaverage_mean
-
-if cfg_blockavg['flag_save_each_subj']:
-    # FIXME: this assumes the number of subjects and trial_type. Generalize this in the future.
-    # blockaverage = blockaverage.sel(trial_type=['ST', 'ST-ica', 'ST-01', 'ST-ica-01', 'ST-02', 'ST-ica-02', 'ST-03', 'ST-ica-03', 'ST-04', 'ST-ica-04', 'ST-05', 'ST-ica-05', 'ST-06', 'ST-ica-06', 'ST-07', 'ST-ica-07', 'ST-08', 'ST-ica-08', 'ST-09', 'ST-ica-09'])
-    blockaverage = blockaverage.sel(trial_type=['ST', 'ST-ica', 'ST-01', 'ST-ica-01', 'ST-02', 'ST-ica-02', 'ST-03', 'ST-ica-03', 'ST-04', 'ST-ica-04', 'ST-06', 'ST-ica-06', 'ST-08', 'ST-ica-08', 'ST-09', 'ST-ica-09'])
-
-if cfg_blockavg['flag_save_group_avg_hrf']:
-    file_path_pkl = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data', 'blockaverage_IWHD_OD.pkl.gz')
-    file = gzip.GzipFile(file_path_pkl, 'wb')
+    if os.path.exists(filepath_bl):
+        with gzip.open(filepath_bl, 'rb') as f:
+            groupavg_results = pickle.load(f)
+        blockaverage = groupavg_results['blockaverage']
+        blockaverage_stderr = groupavg_results['blockaverage_stderr']
+        blockaverage_subj = groupavg_results['blockaverage_subj']
+        blockaverage_mse_subj = groupavg_results['blockaverage_mse_subj']
+        new_rec_str_lst_use_weighted = groupavg_results['new_rec_str_lst_use_weighted']
+        geo2d = groupavg_results['geo2d']
+        geo2d = groupavg_results['geo3d']
+        print("Blockaverage file loaded successfully!")
     
-    if 'chromo' in blockaverage.dims:
-        file.write(pickle.dumps([blockaverage, rec[0][0].geo2d, rec[0][0].geo3d]))
     else:
-        # convert to concentration
-        dpf = xr.DataArray(
-            [1, 1],
-            dims="wavelength",
-            coords={"wavelength": rec[0][0]['amp'].wavelength},
-        )
-        foo = blockaverage.copy()
-        foo = foo.rename({'reltime':'time'})
-        foo.time.attrs['units'] = 'second'
-        foo = cedalion.nirs.od2conc(foo, rec[0][0].geo3d, dpf, spectrum="prahl")
-        foo = foo.rename({'time':'reltime'})
-        foo = foo.transpose('trial_type','chromo','channel','reltime')
-    
-        file.write(pickle.dumps([foo, rec[0][0].geo2d, rec[0][0].geo3d]))
-    
-    file.close()
-    
-    blockaverage_all = blockaverage.copy()
-    blockaverage_all_o = blockaverage_all.copy()
-    
-    print('Saved group average HRF to ' + file_path_pkl)
+        print(f"Error: File '{filepath_bl}' not found!")
+        
+blockaverage_all = blockaverage.copy()
+
 
 
 
 # %% Load the Sensitivity Matrix and Head Model
 ##############################################################################
+
+
 import importlib
 importlib.reload(pfDAB_img)
 
-#path_to_dataset = '/Users/dboas/Documents/People/2024/BoasDavid/NN22_Data/Datasets/BallSqueezing_WHHD/'
-probe_dir = "/projectnb/nphfnirs/ns/lcarlton/DATA/probes/NN22_WHHD/12NN/fw/"
-head_model = 'ICBM152'
 
-Adot, head = pfDAB_img.load_Adot( probe_dir, head_model )
+cfg_sb = {
+    'mask_threshold': -2,
+    'threshold_brain': 5*units.mm,      # threshold_brain / threshold_scalp: Defines spatial limits for brain vs. scalp contributions.
+    'threshold_scalp': 20*units.mm,
+    'sigma_brain': 5*units.mm,      # sigma_brain / sigma_scalp: Controls smoothing or spatial regularization strength.
+    'sigma_scalp': 20*units.mm,
+    'lambda1': 0.01,        # regularization params
+    'lambda2': 0.1
+}
 
+
+cfg_img_recon = {
+    'probe_dir' : '/Users/dboas/Documents/People/2024/BoasDavid/NN22_Data/Datasets/BallSqueezing_WHHD/derivatives/fw',
+    'head_model' : 'ICBM152',
+    't_win' : (10, 20), 
+    'flag_Cmeas' : True,   # if True make sure you are using the correct y_stderr_weighted below (or blockaverage_stderr now)-- covariance
+    'BRAIN_ONLY' : False,
+    'SB' : False,    # spatial basis
+    'alpha_meas_list' : [1e-2],  #[1e0]    measurement regularization (w/ Cmeas, 1 is good)  (w/out Cmeas do 1e-2?)
+    'alpha_spatial_list' : [1e-1],    #[1e-2, 1e-4, 1e-5, 1e-3, 1e-1] #[1e-3]    spatial reg , small pushes deeper into the brain   -- # use smaller alpha spatial od 10^-2 or -3 w/out cmeas
+    'spectrum' : 'prahl',
+    'cfg_sb' : cfg_sb,
+    'flag_save_img_results' : False
+    }
+
+wavelength = rec[0][0]['amp'].wavelength.values
+#trial_type_img = 'ST_o_tddr'  # 'DT-o-imu' # 'DT', ST', 
+
+#
+# Load the Sensitivity Matrix and Head Model
+#
+
+# if Adot is not already loaded
+if 'Adot' not in locals():
+    Adot, head = pfDAB_img.load_Adot( cfg_img_recon['probe_dir'], cfg_img_recon['head_model'])
+
+# !!! add flag for if doing image recon on group avg or direct or indirect
+# !!! ADD flag for if doing image recon on ts or hrf mag
 
 
 # %% Do the image reconstruction
 ##############################################################################
 
+#
+# Get the group average image
+#
+all_trial_X_grp = None
+
+for idx, trial_type in enumerate(blockaverage_all.trial_type):  #enumerate([blockaverage_all.trial_type.values[2]]): 
+
+    # !!! ADD if new_rec_str_use_weighted_lst is NONE then assume all are weighted and do img recon on ALL TRIAL TYPES
+    if not new_rec_str_lst_use_weighted[idx]:  # !!! assumes user used rec_str_lst_use_weighted correctly 
+        print(f'trial type = {trial_type.values} is assumed to be unweighted. Skipping image reconstruction \n')
+        continue      # !!! might want to just run w/out Cmeas in future. skipping for now
+    
+    print(f'Getting images for trial type = {trial_type.values}')
+    
+    if 'chromo' in blockaverage_all.dims:
+        # get the group average HRF over a time window
+        hrf_conc_mag = blockaverage_all.sel(trial_type=trial_type).sel(reltime=slice(cfg_img_recon['t_win'][0],cfg_img_recon['t_win'][1])).mean('reltime')
+        hrf_conc_ts = blockaverage_all.sel(trial_type=trial_type)
+        
+        blockaverage_stderr_conc = blockaverage_stderr.sel(trial_type=trial_type) # need to convert blockaverage_stderr to od if its in conc
+    
+        # convert back to OD
+        E = cedalion.nirs.get_extinction_coefficients(cfg_img_recon['spectrum'], wavelength)
+        hrf_od_mag = xr.dot(E, hrf_conc_mag * 1*units.mm * 1e-6*units.molar / units.micromolar, dim=["chromo"]) # assumes DPF = 1
+        hrf_od_ts = xr.dot(E, hrf_conc_ts * 1*units.mm * 1e-6*units.molar / units.micromolar, dim=["chromo"]) # assumes DPF = 1
+        
+        blockaverage_stderr = xr.dot(E, blockaverage_stderr_conc * 1*units.mm * 1e-6*units.molar / units.micromolar, dim=["chromo"]) # assumes DPF = 1
+            
+    else:
+        hrf_od_mag = blockaverage_all.sel(trial_type=trial_type).sel(reltime=slice(cfg_img_recon['t_win'][0], cfg_img_recon['t_win'][1])).mean('reltime')
+        hrf_od_ts = blockaverage_all.sel(trial_type=trial_type)
+    
+    if not cfg_img_recon['flag_Cmeas']:  
+        cov_str = '' # for name
+        X_grp, W, C, D = pfDAB_img.do_image_recon( hrf_od_mag, head, Adot, None, wavelength, cfg_img_recon, trial_type, save_path)
+    
+    else:
+        cov_str = 'cov'
+       
+        C_meas = blockaverage_stderr.sel(trial_type=trial_type).sel(reltime=slice(cfg_img_recon['t_win'][0], cfg_img_recon['t_win'][1])).mean('reltime') 
+        C_meas = C_meas.pint.dequantify()     # remove units
+        C_meas = C_meas**2  # get variance
+        C_meas = C_meas.stack(measurement=('channel', 'wavelength')).sortby('wavelength')  
+        X_grp, W, C, D = pfDAB_img.do_image_recon( hrf_od_mag, head, Adot, C_meas, wavelength, cfg_img_recon, trial_type, save_path)
+    
+    print(f'Done with Image Reconstruction for trial type = {trial_type.values}')
+    
+    # Unweighted avg - can still get standard error (for Cmeas)
+        # but don't wanna spend time coding it
+    # !!! Therefore, Ditch image recon of pruned data ? !!!
+        # if not weighted avg trial type -> make Cmeas = false
+        
+    X_grp = X_grp.assign_coords(trial_type = trial_type)
+    
+    #
+    #  Calculate the image noise and image CNR
+    #
+    if cfg_img_recon['flag_Cmeas']:
+        X_noise, X_tstat = pfDAB_img.img_noise_tstat(X_grp, W, C_meas)
+        
+        if cfg_img_recon['flag_save_img_results']:
+            pfDAB_img.save_image_results(X_noise, 'X_noise', save_path, trial_type, cfg_img_recon)
+            pfDAB_img.save_image_results(X_tstat, 'X_tstat', save_path, trial_type, cfg_img_recon)
+        
+        X_noise = X_noise.assign_coords(trial_type = trial_type)
+        X_tstat = X_tstat.assign_coords(trial_type = trial_type)
+        
+        # save results for all trial types
+        if all_trial_X_grp is None:
+            all_trial_X_grp = X_grp
+            all_trial_X_noise = X_noise  # comes from diag of covariance matrix
+            all_trial_X_tstat = X_tstat 
+        else:
+            all_trial_X_grp = xr.concat([all_trial_X_grp, X_grp], dim='trial_type')
+            all_trial_X_noise = xr.concat([all_trial_X_noise, X_noise], dim='trial_type')
+            all_trial_X_tstat = xr.concat([all_trial_X_tstat, X_tstat], dim='trial_type')
+            
+        results_img_grp = {'X_grp_all_trial': all_trial_X_grp,
+                   'X_noise_grp_all_trial': all_trial_X_noise,
+                   'X_tstat_grp_all_trial': all_trial_X_tstat
+                   }
+    
+    # if flag_Cmeas is false, can't calc tstat and noise
+    else:
+        if all_trial_X_grp is None:
+            all_trial_X_grp = X_grp
+        else:
+            all_trial_X_grp = xr.concat([all_trial_X_grp, X_grp], dim='trial_type')
+    
+tasknm = cfg_dataset["file_ids"][0].split('_')[0] # get task name
+
+filepath = os.path.join(cfg_dataset['root_dir'], f'X_{tasknm}_alltrials_{cov_str}_alpha_spatial_{cfg_img_recon["alpha_spatial_list"][-1]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas_list"][-1]:.0e}.pkl.gz')
+print(f'Saving to X_{tasknm}_alltrials_{cov_str}_alpha_spatial_{cfg_img_recon["alpha_spatial_list"][-1]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas_list"][-1]:.0e}.pkl.gz')
+file = gzip.GzipFile(filepath, 'wb')
+file.write(pickle.dumps(results_img_grp))
+file.close()    
+
+
+
+
+
+# %% OLD
+
 import importlib
 importlib.reload(pfDAB_img)
 
 
-trial_type_img = 'DT' #'STS-o' # 'DT', 'DT-ica', 'ST', 'ST-ica'
+trial_type_img = 'active_o_tddr' #'STS-o' # 'DT', 'DT-ica', 'ST', 'ST-ica'
 t_win = (10, 20)
 
 file_save = True
@@ -641,9 +766,13 @@ importlib.reload(pfDAB_img)
 
 flag_hbo = True
 flag_brain = True
-flag_img = 'noise' # 'tstat', 'mag', 'noise'
-flag_condition = 'STS' # 'ST', 'DT', 'STS'
+flag_img = 'mag' # 'tstat', 'mag', 'noise'
+flag_condition = 'active_o_tddr' # 'ST', 'DT', 'STS'
 
+# results_img_grp = {'X_grp_all_trial': all_trial_X_grp,
+#            'X_noise_grp_all_trial': all_trial_X_noise,
+#            'X_tstat_grp_all_trial': all_trial_X_tstat
+#            }
 
 if flag_hbo:
     title_str = 'HbO'
@@ -663,13 +792,15 @@ if flag_img == 'tstat':
     foo_img = X_tstat.copy()
     title_str = title_str + ' t-stat'
 elif flag_img == 'mag':
-    foo_img = X_hrf_mag_mean_weighted.copy()
+#    foo_img = X_hrf_mag_mean_weighted.copy()
+    foo_img = results_img_grp['X_grp_all_trial'].sel(trial_type=flag_condition)
     title_str = title_str + ' magnitude'
 elif flag_img == 'noise':
     foo_img = X_stderr_weighted.copy()
     title_str = title_str + ' noise'
 #    foo_img.values = np.log10(foo_img.values)+7
 
+title_str = title_str + ' ' + flag_condition
 
 # title_str = 'HbR'
 # hbx_brain_scalp = 'hbr_brain'
@@ -685,14 +816,22 @@ elif flag_img == 'noise':
 foo_img[~M] = np.nan
 # foo_img = xr.where(np.abs(foo_img) < 1.86, np.nan, foo_img) # one-tail is 1.86 and two tail is 2.3
 
+clim = (-foo_img.sel(chromo='HbO').max(), foo_img.sel(chromo='HbO').max())
 
+p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,1), clim, hbx_brain_scalp, 'scale_bar',
+                            None, title_str, off_screen=True )
+p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,0), clim, hbx_brain_scalp, 'left', p0)
+p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,1), clim, hbx_brain_scalp, 'superior', p0)
+p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,2), clim, hbx_brain_scalp, 'right', p0)
+p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,0), clim, hbx_brain_scalp, 'anterior', p0)
+p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,2), clim, hbx_brain_scalp, 'posterior', p0)
 
-p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,1), hbx_brain_scalp, 'scale_bar', None, title_str)
-p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,0), hbx_brain_scalp, 'left', p0)
-p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,1), hbx_brain_scalp, 'superior', p0)
-p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,2), hbx_brain_scalp, 'right', p0)
-p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,0), hbx_brain_scalp, 'anterior', p0)
-p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,2), hbx_brain_scalp, 'posterior', p0)
+# p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,1), clim, hbx_brain_scalp, 'scale_bar', None, title_str)
+# p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,0), hbx_brain_scalp, 'left', p0)
+# p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,1), hbx_brain_scalp, 'superior', p0)
+# p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,2), hbx_brain_scalp, 'right', p0)
+# p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,0), hbx_brain_scalp, 'anterior', p0)
+# p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,2), hbx_brain_scalp, 'posterior', p0)
 
 p0.screenshot( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots', f'IMG.png') )
 p0.close()

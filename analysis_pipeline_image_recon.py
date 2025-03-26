@@ -94,32 +94,45 @@ cfg_imu_glm = {'statesPerDataFrame' : 89,
 		'n_components' : [3, 2],  # [gyro, accel]       # --- note: this will change fig sizes
         'butter_order' : 4,   # butterworth filter order
         'Fc' : 0.1,   # cutoff freq (Hz)
-        'plot_flag_imu' : True
+        'plot_flag_imu' : True  # !!! Check where this is saving -> make own folder???
 }
 
 cfg_motion_correct = {
     'flag_do_splineSG' : False, # if True, will do splineSG motion correction
     'splineSG_p' : 0.99, 
     'splineSG_frame_size' : 10 * units.s,
-    'flag_do_tddr' : True,
-    'flag_do_imu_glm' : False,
+    'flag_do_tddr' : True,  # !!! This isn't doing anything? - don't think I've added a check in the code so tddr is always done
+    'flag_do_imu_glm' : True,
     'cfg_imu_glm' : cfg_imu_glm,
 }
 
 cfg_bandpass = { 
-    'fmin' : 0.02 * units.Hz,
-    'fmax' : 3 * units.Hz
+    'fmin' : 0.01 * units.Hz, #0.02 * units.Hz,
+    'fmax' : 0.5 * units.Hz  #3 * units.Hz
 }
+
+cfg_GLM = {
+    'drift_order' : 1,
+    'distance_threshold' : 20*units.mm, # for ssr
+    'short_channel_method' : 'mean',
+    'noise_model' : "ols",
+    't_delta' : 1*units.s ,   # for seq of Gauss basis func - the temporal spacing between consecutive gaussians
+    't_std' : 1*units.s ,     #  the temporal spacing between consecutive gaussians
+    't_pre' : 5*units.s, 
+    't_post' : 33*units.s   # !!! make same as blockaverage???
+    }
 
 cfg_preprocess = {
     'median_filt' : 3, # set to 1 if you don't want to do median filtering
     'cfg_prune' : cfg_prune,
     'cfg_motion_correct' : cfg_motion_correct,
-    'cfg_bandpass' : cfg_bandpass
+    'cfg_bandpass' : cfg_bandpass,
+    'flag_do_GLM_filter' : True,
+    'cfg_GLM' : cfg_GLM 
 }
 
 
-cfg_mse_conc = {
+cfg_mse_conc = {                
     'mse_val_for_bad_data' : 1e7 * units.micromolar**2, 
     'mse_amp_thresh' : 1.1e-6,
     'mse_min_thresh' : 1e0 * units.micromolar**2, 
@@ -134,39 +147,26 @@ cfg_mse_od = {
     'blockaverage_val' : 0      # blockaverage val for bad data?
     }
 
-
-cfg_GLM = {
-    'drift_order' : 1,
-    'distance_threshold' : 20*units.mm, # for ssr
-    'short_channel_method' : 'mean',
-    'noise_model' : "ols",
-    't_delta' : 1*units.s ,   # for seq of Gauss basis func - the temporal spacing between consecutive gaussians
-    't_std' : 1*units.s ,     #  the temporal spacing between consecutive gaussians
-    }
-
-
 cfg_blockavg = {
-    'rec_str_lst' : ['od_tddr', 'od_o_tddr', 'od_imu_tddr', 'od_o_imu_tddr'],
-    #'rec_str_lst' : ['od_tddr', 'od_o_tddr'],   # list of rec_str you want to block average
-    'rec_str_lst_use_weighted' : [False, True, False, True] ,  # list indicating whether to save weighted for each rec_str
+    #'rec_str_lst' : ['od_tddr', 'od_o_tddr', 'od_imu_tddr', 'od_o_imu_tddr'],
+    'rec_str_lst' : ['od_tddr', 'od_o_tddr'],   # list of rec_str you want to block average
+    'rec_str_lst_use_weighted' : [False, True],  #, False, True] ,  # list indicating whether to save weighted for each rec_str
     'trange_hrf' : [5, 35] * units.s,
     'trange_hrf_stat' : [10, 20],
     'stim_lst_hrf' : ['ST', 'DT'], # FIXME: why have multiple of this
-    #'stim_lst_hrf' : ['STS'], # FIXME: why have multiple of this
-    'flag_do_GLM_filter' : True,
-    'cfg_GLM' : cfg_GLM,
+    #'stim_lst_hrf' : ['STS'], 
     'flag_save_group_avg_hrf': True,
     'flag_save_each_subj' : False,  # if True, will save the block average data for each subject
     'cfg_mse_conc' : cfg_mse_conc,
     'cfg_mse_od' : cfg_mse_od
-    }               # !!! provide list of rec str and whether or not to save weighted for each one
+    }               
 
 
 cfg_erbmICA = {}
 
 save_path = cfg_dataset['root_dir'] + 'derivatives/processed_data/'
 
-flag_load_preprocessed_data = True  # if 1, will skip load_and_preprocess function and use saved data
+flag_load_preprocessed_data = False  # if 1, will skip load_and_preprocess function and use saved data
 flag_save_preprocessed_data = False   # SAVE or no save
 
 flag_load_blockaveraged_data = False
@@ -206,7 +206,7 @@ if not flag_load_preprocessed_data:
     
     # SAVE preprocessed data 
     if flag_save_preprocessed_data:
-    
+        print(f"Saving preprocessed data for {cfg_dataset['file_ids']}")
         with gzip.open( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data', 
                                      'chs_pruned_subjs_ts_' + cfg_dataset["file_ids"][0].split('_')[0]+ '.pkl'), 'wb') as f: # !!! FIX ME: naming convention assumes file_ids only includes ONE task
             pickle.dump(chs_pruned_subjs, f, protocol=pickle.HIGHEST_PROTOCOL )
@@ -223,7 +223,7 @@ if not flag_load_preprocessed_data:
 
         with open(os.path.join(save_path, cfg_save_str), "w", encoding="utf-8") as f:
             json.dump(dict_cfg_save, f, indent=4, default = str)  # Save as JSON with indentation
-        
+        print("Preprocessed data successfully saved.")
         
 # LOAD in saved data
 else:
@@ -232,8 +232,28 @@ else:
          rec = pickle.load(f)
     with gzip.open( os.path.join(save_path, 'chs_pruned_subjs_ts_' + cfg_dataset["file_ids"][0].split('_')[0] + '.pkl'), 'rb') as f:
          chs_pruned_subjs = pickle.load(f)
+    print(f'Data loaded successfully for {cfg_dataset["file_ids"][0].split("_")[0]}')
 
+#%%
+if flag_save_preprocessed_data:
+    print(f"Saving preprocessed data for {cfg_dataset['file_ids']}")
+    with gzip.open( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data', 
+                                 'chs_pruned_subjs_ts_' + cfg_dataset["file_ids"][0].split('_')[0]+ '.pkl'), 'wb') as f: # !!! FIX ME: naming convention assumes file_ids only includes ONE task
+        pickle.dump(chs_pruned_subjs, f, protocol=pickle.HIGHEST_PROTOCOL )
+        
+    with gzip.open( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'processed_data', 
+                                 'rec_list_ts_' + cfg_dataset["file_ids"][0].split('_')[0] + '.pkl'), 'wb') as f:
+        pickle.dump(rec, f, protocol=pickle.HIGHEST_PROTOCOL )
+        
+        
+    # SAVE cfg params to json file
+    # !!! ADD image recon cfg 
+    dict_cfg_save = {"cfg_dataset" : cfg_dataset, "cfg_preprocess" : cfg_preprocess, "cfg_GLM" : cfg_GLM, "cfg_blockavg" : cfg_blockavg}
+    cfg_save_str = 'cfg_params_' + cfg_dataset["file_ids"][0].split('_')[0] + '.json'
 
+    with open(os.path.join(save_path, cfg_save_str), "w", encoding="utf-8") as f:
+        json.dump(dict_cfg_save, f, indent=4, default = str)  # Save as JSON with indentation
+    print("Preprocessed data successfully saved.")
 
 # %% ERBM ICA Filtering 
 ##############################################################################
@@ -285,12 +305,13 @@ ica_lpf = 1.0 * units.Hz # MUST be the same as used when creating W_ica
 import importlib
 importlib.reload(pfDAB_grp_avg)
 
-flag_load_blockaveraged_data = True
-#flag_load_od_data = True # !!! change
+flag_load_blockaveraged_data = False
 
-rec_str_lst = ['od_tddr', 'od_o_tddr', 'od_imu_tddr', 'od_o_imu_tddr']
+#rec_str_lst = ['od_tddr', 'od_o_tddr', 'od_imu_tddr', 'od_o_imu_tddr']
+#rec_str_lst = ['od_tddr', 'od_o_tddr']
+rec_str_lst = ['od_tddr_postglm', 'od_o_tddr_postglm', 'od_imu_tddr_postglm', 'od_o_imu_tddr_postglm']
 
-rec_str_lst_use_weighted = [False, True, False, True] 
+rec_str_lst_use_weighted = [False, True]  #, False, True] 
 # !!!  ^^^use for  image recon -> if Cmeas false or true
 
 # for saving file name 
@@ -312,11 +333,6 @@ if not flag_load_blockaveraged_data:
     new_rec_str_lst_use_weighted = []
     [new_rec_str_lst_use_weighted .extend([value] * len(cfg_blockavg['stim_lst_hrf'])) for value in rec_str_lst_use_weighted] # Repeat each value for each trial type
 
-    if cfg_blockavg['flag_save_each_subj']:
-        # FIXME: this assumes the number of subjects and trial_type. Generalize this in the future.
-        # blockaverage = blockaverage.sel(trial_type=['ST', 'ST-ica', 'ST-01', 'ST-ica-01', 'ST-02', 'ST-ica-02', 'ST-03', 'ST-ica-03', 'ST-04', 'ST-ica-04', 'ST-05', 'ST-ica-05', 'ST-06', 'ST-ica-06', 'ST-07', 'ST-ica-07', 'ST-08', 'ST-ica-08', 'ST-09', 'ST-ica-09'])
-        blockaverage = blockaverage.sel(trial_type=['ST', 'ST-ica', 'ST-01', 'ST-ica-01', 'ST-02', 'ST-ica-02', 'ST-03', 'ST-ica-03', 'ST-04', 'ST-ica-04', 'ST-06', 'ST-ica-06', 'ST-08', 'ST-ica-08', 'ST-09', 'ST-ica-09'])
-    
     
     groupavg_results = {'blockaverage': blockaverage_mean,
                'blockaverage_stderr': blockaverage_stderr,
@@ -335,11 +351,6 @@ if not flag_load_blockaveraged_data:
         print('Saved group average HRF to ' + file_path_pkl)
 
 else: # LOAD data
-    # if flag_load_od_data:  # !!! change
-    #     save_str = 'OD'
-    # else:
-    #     save_str = 'CONC'
-        
     filname =  'blockaverage_' + cfg_dataset["file_ids"][0].split('_')[0] + '_' + save_str + '.pkl.gz'
     filepath_bl = os.path.join(save_path , filname)
     
@@ -384,10 +395,10 @@ cfg_img_recon = {
     'probe_dir' : "/projectnb/nphfnirs/ns/lcarlton/DATA/probes/NN22_WHHD/12NN/fw/",
     'head_model' : 'ICBM152',
     't_win' : (10, 20), 
-    'flag_Cmeas' : True,   # if True make sure you are using the correct y_stderr_weighted below (or blockaverage_stderr now)-- covariance
+    'flag_Cmeas' : False,   # if True make sure you are using the correct y_stderr_weighted below (or blockaverage_stderr now)-- covariance
     'BRAIN_ONLY' : False,
     'SB' : False,    # spatial basis
-    'alpha_meas_list' : [1e0],  #[1e-2, 1e-3, 1e-5] #[1e-3]   measurement regularization (w/ Cmeas, 1 is good) 
+    'alpha_meas_list' : [1e-2],  #[1e0]    measurement regularization (w/ Cmeas, 1 is good)  (w/out Cmeas do 1e-2?)
     'alpha_spatial_list' : [1e-1],    #[1e-2, 1e-4, 1e-5, 1e-3, 1e-1] #[1e-3]    spatial reg , small pushes deeper into the brain   -- # use smaller alpha spatial od 10^-2 or -3 w/out cmeas
     'spectrum' : 'prahl',
     'cfg_sb' : cfg_sb,
@@ -403,7 +414,10 @@ wavelength = rec[0][0]['amp'].wavelength.values
 
 Adot, head = pfDAB_img.load_Adot( cfg_img_recon['probe_dir'], cfg_img_recon['head_model'])
 
-# !!! CHECK ME
+# !!! add flag for if doing image recon on group avg or direct or indirect
+# !!! ADD flag for if doing image recon on ts or hrf mag
+
+
 #%%
 #
 # Get the group average image
@@ -494,9 +508,10 @@ for idx, trial_type in enumerate(blockaverage_all.trial_type):  #enumerate([bloc
         else:
             all_trial_X_grp = xr.concat([all_trial_X_grp, X_grp], dim='trial_type')
     
+tasknm = cfg_dataset["file_ids"][0].split('_')[0] # get task name
 
-filepath = os.path.join(cfg_dataset['root_dir'], f'X_alltrials_{cov_str}_alpha_spatial_{cfg_img_recon["alpha_spatial_list"][-1]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas_list"][-1]:.0e}.pkl.gz')
-print(f'   Saving to X_alltrials_{cov_str}_alpha_spatial_{cfg_img_recon["alpha_spatial_list"][-1]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas_list"][-1]:.0e}.pkl.gz')
+filepath = os.path.join(cfg_dataset['root_dir'], f'X_{tasknm}_alltrials_{cov_str}_alpha_spatial_{cfg_img_recon["alpha_spatial_list"][-1]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas_list"][-1]:.0e}.pkl.gz')
+print(f'   Saving to X_{tasknm}_alltrials_{cov_str}_alpha_spatial_{cfg_img_recon["alpha_spatial_list"][-1]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas_list"][-1]:.0e}.pkl.gz')
 file = gzip.GzipFile(filepath, 'wb')
 file.write(pickle.dumps(results_img_grp))
 file.close()    
@@ -509,9 +524,10 @@ file.close()
 import importlib
 importlib.reload(pfDAB_img)
 
-# !!! ADD if flag_cmeas then do img recon w Cmeas, if not, then don't
-# ADD 
 
+# add if chromo in blockaverage_subj.dims -> convert to OD --- 
+    # !!! ^^ I think if in conc it will give error bc of blockaverage_subj_mse - check
+# !!! ADD flag for if doing image recon on ts or hrf mag 
 
 X_hrf_mag_subj = None
 C = None # spatial regularization 
@@ -538,10 +554,29 @@ for idx_trial, trial_type in enumerate(blockaverage_subj.trial_type):
         
         # Check if rec_str exists for current subject
         if curr_subj in cfg_dataset['subj_id_exclude']:
-            #print(f"   Subject {subj_ids[idx_subj]} excluded from group average")
+            print(f'   Subject {cfg_dataset["subj_ids"][idx_subj]} excluded from group average')
             continue  # if subject is excluded, skip this loop
+        
+        if 'chromo' in blockaverage_subj.dims:
+            # get the group average HRF over a time window
+            hrf_conc_mag = blockaverage_subj.sel(subj= curr_subj).sel(trial_type=trial_type).sel(reltime=slice(cfg_img_recon['t_win'][0],cfg_img_recon['t_win'][1])).mean('reltime')
+            hrf_conc_ts = blockaverage_subj.sel(subj= curr_subj).sel(trial_type=trial_type)
             
-        hrf_od_mag = blockaverage_subj.sel(subj=cfg_dataset['subj_ids'][idx_subj]).sel(trial_type=trial_type).sel(reltime=slice(cfg_img_recon['t_win'][0], cfg_img_recon['t_win'][1])).mean('reltime') 
+            blockaverage_mse_subj_conc = blockaverage_mse_subj.sel(subj= curr_subj).sel(trial_type=trial_type)
+            
+            # convert back to OD
+            E = cedalion.nirs.get_extinction_coefficients(cfg_img_recon['spectrum'], wavelength)
+            hrf_od_mag = xr.dot(E, hrf_conc_mag * 1*units.mm * 1e-6*units.molar / units.micromolar, dim=["chromo"]) # !!! assumes DPF = 1
+            hrf_od_ts = xr.dot(E, hrf_conc_ts * 1*units.mm * 1e-6*units.molar / units.micromolar, dim=["chromo"]) # assumes DPF = 1
+                
+            blockaverage_mse_subj= xr.dot(E, blockaverage_mse_subj_conc * 1*units.mm * 1e-6*units.molar / units.micromolar, dim=["chromo"]) # assumes DPF = 1
+
+        else:
+            hrf_od_mag = blockaverage_subj.sel(subj= curr_subj).sel(trial_type=trial_type).sel(reltime=slice(cfg_img_recon['t_win'][0], cfg_img_recon['t_win'][1])).mean('reltime')
+            hrf_od_ts = blockaverage_subj.sel(subj= curr_subj).sel(trial_type=trial_type)
+
+        #
+        #hrf_od_mag = blockaverage_subj.sel(subj=cfg_dataset['subj_ids'][idx_subj]).sel(trial_type=trial_type).sel(reltime=slice(cfg_img_recon['t_win'][0], cfg_img_recon['t_win'][1])).mean('reltime') 
         # hrf_od_ts = blockaverage_all.sel(trial_type=trial_type)
     
         # get the image
@@ -555,17 +590,29 @@ for idx_trial, trial_type in enumerate(blockaverage_subj.trial_type):
             cov_str = 'cov'
             if C is None or D is None:
                 #X_hrf_mag_tmp, W, C, D = pfDAB_img.do_image_recon( hrf_od_mag, head, Adot, C_meas, wavelength, BRAIN_ONLY, SB, sb_cfg, alpha_spatial_list, alpha_meas_list, file_save, file_path0, trial_type) 
-                X_hrf_mag_tmp, W, C, D = pfDAB_img.do_image_recon( hrf_od_mag, head, Adot, C_meas, wavelength, cfg_img_recon, trial_type, save_path) 
+                X_hrf_mag_tmp, W, C, D = pfDAB_img.do_image_recon( hrf_od = hrf_od_mag, head = head, Adot = Adot, C_meas = C_meas,
+                                                                  wavelength = wavelength, cfg_img_recon = cfg_img_recon, 
+                                                                  trial_type_img = trial_type, save_path = save_path,
+                                                                  W = None, C = None, D = None) 
         
             else:
-                X_hrf_mag_tmp, W, _, _ = pfDAB_img.do_image_recon( hrf_od_mag, head, Adot, C_meas, wavelength, cfg_img_recon, trial_type, save_path, None, C, D)
+                X_hrf_mag_tmp, W, _, _ = pfDAB_img.do_image_recon( hrf_od = hrf_od_mag, head = head, Adot = Adot, C_meas = C_meas, 
+                                                                  wavelength = wavelength, cfg_img_recon = cfg_img_recon, 
+                                                                  trial_type_img = trial_type, save_path = save_path, 
+                                                                  W = None, C = C, D = D)
         else:
             cov_str = ''
             if C is None or D is None:
-                X_hrf_mag_tmp, W, C, D = pfDAB_img.do_image_recon( hrf_od_mag, head, Adot, None, wavelength, cfg_img_recon, trial_type, save_path) 
+                X_hrf_mag_tmp, W, C, D = pfDAB_img.do_image_recon( hrf_od = hrf_od_mag, head = head, Adot = Adot, C_meas = None,
+                                                                  wavelength = wavelength, cfg_img_recon = cfg_img_recon, 
+                                                                  trial_type_img = trial_type, save_path = save_path,
+                                                                  W = None, C = None, D = None) 
         
             else:
-                X_hrf_mag_tmp, W, _, _ = pfDAB_img.do_image_recon( hrf_od_mag, head, Adot, None, wavelength, cfg_img_recon, trial_type, save_path, None, C, D)
+                X_hrf_mag_tmp, W, _, _ = pfDAB_img.do_image_recon( hrf_od = hrf_od_mag, head = head, Adot = Adot, C_meas = None, 
+                                                                  wavelength = wavelength, cfg_img_recon = cfg_img_recon, 
+                                                                  trial_type_img = trial_type, save_path = save_path, 
+                                                                  W = None, C = C, D = D)
         
 
         # get image noise
@@ -660,16 +707,18 @@ results_img_s = {'X_hrf_mag_all_trial': all_trial_X_hrf_mag,
            'X_tstat_all_trial': all_trial_X_tstat
            }
 
+tasknm = cfg_dataset["file_ids"][0].split('_')[0]
+
 # !!! chang name when indirect is implemented
 if not cfg_img_recon['SB']:
-    filepath = os.path.join(save_path, f'Xs_direct_alltrial_{cov_str}_alpha_spatial_{cfg_img_recon["alpha_spatial_list"][-1]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas_list"][-1]:.0e}.pkl.gz')
-    print(f'   Saving to Xs_direct_alltrial_{cov_str}_alpha_spatial_{cfg_img_recon["alpha_spatial_list"][-1]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas_list"][-1]:.0e}.pkl.gz')
+    filepath = os.path.join(save_path, f'Xs_{tasknm}_direct_alltrial_{cov_str}_alpha_spatial_{cfg_img_recon["alpha_spatial_list"][-1]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas_list"][-1]:.0e}.pkl.gz')
+    print(f'   Saving to Xs_{tasknm}_direct_alltrials_{cov_str}_alpha_spatial_{cfg_img_recon["alpha_spatial_list"][-1]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas_list"][-1]:.0e}.pkl.gz')
     file = gzip.GzipFile(filepath, 'wb')
     file.write(pickle.dumps(results_img_s))
     file.close()     
 else:
-    filepath = os.path.join(save_path, f'Xs_direct_alltrial_{cov_str}_alpha_spatial_{cfg_img_recon["alpha_spatial_list"][-1]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas_list"][-1]:.0e}_SB_sigma_brain_{cfg_img_recon["sigma_brain"]}_sigma_scalp_{cfg_img_recon["sigma_scalp"]}.pkl.gz')
-    print(f'   Saving to Xs_direct_alltrial_{cov_str}_alpha_spatial_{cfg_img_recon["alpha_spatial_list"][-1]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas_list"][-1]:.0e}.pkl.gz')
+    filepath = os.path.join(save_path, f'Xs_{tasknm}_direct_alltrial_{cov_str}_alpha_spatial_{cfg_img_recon["alpha_spatial_list"][-1]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas_list"][-1]:.0e}_SB_sigma_brain_{cfg_img_recon["sigma_brain"]}_sigma_scalp_{cfg_img_recon["sigma_scalp"]}.pkl.gz')
+    print(f'   Saving to Xs_{tasknm}_direct_alltrials_{cov_str}_alpha_spatial_{cfg_img_recon["alpha_spatial_list"][-1]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas_list"][-1]:.0e}.pkl.gz')
     file = gzip.GzipFile(filepath, 'wb')
     file.write(pickle.dumps(results_img_s))
     file.close()     
@@ -685,105 +734,197 @@ else:
 # file.write(pickle.dumps(results))
 # file.close()   
 
+#%%
+# tasknm = cfg_dataset["file_ids"][0].split('_')[0]
+
+# filepath = os.path.join(save_path, f'Xs_{tasknm}_direct_alltrial_{cov_str}_alpha_spatial_{cfg_img_recon["alpha_spatial_list"][-1]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas_list"][-1]:.0e}.pkl.gz')
+# print(f'   Saving to Xs_{tasknm}_direct_alltrials_{cov_str}_alpha_spatial_{cfg_img_recon["alpha_spatial_list"][-1]:.0e}_alpha_meas_{cfg_img_recon["alpha_meas_list"][-1]:.0e}.pkl.gz')
+# file = gzip.GzipFile(filepath, 'wb')
+# file.write(pickle.dumps(results_img_s))
+# file.close()   
+
+
 #%% Load image recon results
 
-filname =  'Xs_direct_alltrial_cov_alpha_spatial_1e-01_alpha_meas_1e+00.pkl.gz'
-filepath_bl = os.path.join(save_path , filname)
+# filname =  'Xs_STS_direct_alltrial_cov_alpha_spatial_1e-01_alpha_meas_1e+00.pkl.gz'
+# filepath_bl = os.path.join(save_path , filname)
 
-if os.path.exists(filepath_bl):
-    with gzip.open(filepath_bl, 'rb') as f:
-        results_img_s = pickle.load(f)
-    all_trial_X_hrf_mag = results_img_s['X_hrf_mag_all_trial']
-    all_trial_X_hrf_mag_weighted = results_img_s['X_hrf_mag_weighted_all_trial']
-    all_trial_X_tstat = results_img_s['X_tstat_all_trial']
-    all_trial_X_stderr = results_img_s['X_std_err_all_trial']
+# if os.path.exists(filepath_bl):
+#     with gzip.open(filepath_bl, 'rb') as f:
+#         results_img_s = pickle.load(f)
+#     all_trial_X_hrf_mag = results_img_s['X_hrf_mag_all_trial']
+#     all_trial_X_hrf_mag_weighted = results_img_s['X_hrf_mag_weighted_all_trial']
+#     all_trial_X_tstat = results_img_s['X_tstat_all_trial']
+#     all_trial_X_stderr = results_img_s['X_std_err_all_trial']
     
-    print("Image results file loaded successfully!")
+#     print("Image results file loaded successfully!")
 
 
 # %% Plot the images
 ##############################################################################
-threshold = -2 # log10 absolute
-wl_idx = 1
-M = sbf.get_sensitivity_mask(Adot, threshold, wl_idx)
-SAVE = True
-flag_hbo = True
-flag_brain = True
-flag_img_list = ['mag', 'noise']    # ['mag', 'tstat', 'noise'] #, 'noise'
-#flag_condition_list =['ST_o_tddr', 'ST_o_imu_tddr', 'DT_o_tddr', 'DT_o_imu_tddr'] #
-flag_condition_list = all_trial_X_hrf_mag.trial_type.values
 
-der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots', 'image_recon')
-if not os.path.exists(der_dir):
-    os.makedirs(der_dir)
+# !!! CHANGE FILE NAME IF GROUP INSTEAD OF XS
 
-direct_name = 'direct'  # !!! Change when implementing indirect method
 
-for flag_condition in flag_condition_list:
+if all_trial_X_hrf_mag.trial_type.values.ndim > 0:
     
-    for flag_img in flag_img_list:
+    threshold = -2 # log10 absolute
+    wl_idx = 1
+    M = sbf.get_sensitivity_mask(Adot, threshold, wl_idx)
+    SAVE = True
+    flag_hbo = True
+    flag_brain = True
+    flag_img_list = ['mag','tstat', 'noise']    # ['mag', 'tstat', 'noise'] #, 'noise'
+    #flag_condition_list =['ST_o_tddr', 'ST_o_imu_tddr', 'DT_o_tddr', 'DT_o_imu_tddr'] #
+    flag_condition_list = all_trial_X_hrf_mag.trial_type.values
+    
+    
+    der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots', 'image_recon')
+    if not os.path.exists(der_dir):
+        os.makedirs(der_dir)
+    
+    direct_name = 'Direct'  # !!! Change when implementing indirect method
+    
+    for flag_condition in flag_condition_list:
         
-        if flag_hbo:
-            title_str = 'HbO'
-            hbx_brain_scalp = 'hbo'
-        else:
-            title_str = 'HbR'
-            hbx_brain_scalp = 'hbr'
-        
-        if flag_brain:
-            title_str = title_str + ' brain'
-            hbx_brain_scalp = hbx_brain_scalp + '_brain'
-        else:
-            title_str = title_str + ' scalp'
-            hbx_brain_scalp = hbx_brain_scalp + '_scalp'
-        
-        if flag_img == 'tstat':
-            foo_img = all_trial_X_tstat.sel(trial_type=flag_condition).copy()
-            title_str = title_str + ' t-stat'
-        elif flag_img == 'mag':
-            foo_img = all_trial_X_hrf_mag_weighted.sel(trial_type=flag_condition).copy()  # plotting weighted
-            title_str = title_str + ' magnitude'
-        elif flag_img == 'noise':
-            foo_img = all_trial_X_stderr.sel(trial_type=flag_condition).copy()
-            title_str = title_str + ' noise'
-
-        foo_img = foo_img.pint.dequantify()
-        foo_img = foo_img.transpose('vertex', 'chromo')
-        foo_img[~M] = np.nan
-        
-        clim = (-foo_img.sel(chromo='HbO').max(), foo_img.sel(chromo='HbO').max())
-        # if flag_img == 'tstat':
-        #     clim = [-5, 5]
-        p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,1), clim, hbx_brain_scalp, 'scale_bar',
-                                  None, title_str, off_screen=SAVE )
-        p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,0), clim, hbx_brain_scalp, 'left', p0)
-        p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,1), clim, hbx_brain_scalp, 'superior', p0)
-        p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,2), clim, hbx_brain_scalp, 'right', p0)
-        p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,0), clim, hbx_brain_scalp, 'anterior', p0)
-        p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,2), clim, hbx_brain_scalp, 'posterior', p0)
-        
-        if SAVE:
-            if not cfg_img_recon['SB']:
-                filname = f'IMG_{direct_name}_{cov_str}_{flag_condition}_{flag_img}_{hbx_brain_scalp}.png'
+        for flag_img in flag_img_list:
+            
+            if flag_hbo:
+                title_str = flag_condition + ' HbO'
+                hbx_brain_scalp = 'hbo'
             else:
-                filname = f'IMG_{direct_name}_{cov_str}_{flag_condition}_{flag_img}_{hbx_brain_scalp}_SB.png'
-            p0.screenshot( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots', 'image_recon', filname) )
-            p0.close()
-        else:
-            p0.show()
+                title_str = flag_condition + ' HbR'
+                hbx_brain_scalp = 'hbr'
             
+            if flag_brain:
+                title_str = title_str + ' brain'
+                hbx_brain_scalp = hbx_brain_scalp + '_brain'
+            else:
+                title_str = title_str + ' scalp'
+                hbx_brain_scalp = hbx_brain_scalp + '_scalp'
             
+            if flag_img == 'tstat':
+                foo_img = all_trial_X_tstat.sel(trial_type=flag_condition).copy()
+                title_str = title_str + ' t-stat'
+            elif flag_img == 'mag':
+                foo_img = all_trial_X_hrf_mag_weighted.sel(trial_type=flag_condition).copy()  # plotting weighted
+                title_str = title_str + ' magnitude'
+            elif flag_img == 'noise':
+                foo_img = all_trial_X_stderr.sel(trial_type=flag_condition).copy()
+                title_str = title_str + ' noise'
+    
+            foo_img = foo_img.pint.dequantify()
+            foo_img = foo_img.transpose('vertex', 'chromo') # why r we transposing these?
+            foo_img[~M] = np.nan
             
+            clim = (-foo_img.sel(chromo='HbO').max(), foo_img.sel(chromo='HbO').max())
+            # if flag_img == 'tstat':
+            #     clim = [-5, 5]
+            p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,1), clim, hbx_brain_scalp, 'scale_bar',
+                                      None, title_str, off_screen=SAVE )
+            p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,0), clim, hbx_brain_scalp, 'left', p0)
+            p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,1), clim, hbx_brain_scalp, 'superior', p0)
+            p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,2), clim, hbx_brain_scalp, 'right', p0)
+            p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,0), clim, hbx_brain_scalp, 'anterior', p0)
+            p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,2), clim, hbx_brain_scalp, 'posterior', p0)
+            
+            if SAVE:
+                if not cfg_img_recon['SB']:
+                    filname = f'IMG_{flag_condition}_{direct_name}_{cov_str}_{flag_img}_{hbx_brain_scalp}.png'
+                else:
+                    filname = f'IMG_{flag_condition}_{direct_name}_{cov_str}_{flag_img}_{hbx_brain_scalp}_SB.png'
+                p0.screenshot( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots', 'image_recon', filname) )
+                p0.close()
+            else:
+                p0.show()
+                
+else:        
+    #%%        
+    # IF ONLY 1 TRIAL TYPE - plot images this way
+    
+    all_trial_X_hrf_mag_weighted_new = all_trial_X_hrf_mag_weighted.expand_dims("trial_type")
+    all_trial_X_tstat_new = all_trial_X_tstat.expand_dims("trial_type")
+    all_trial_X_stderr_new = all_trial_X_stderr.expand_dims("trial_type")
+    
+    
+    threshold = -2 # log10 absolute
+    wl_idx = 1
+    M = sbf.get_sensitivity_mask(Adot, threshold, wl_idx)
+    SAVE = True
+    flag_hbo = True
+    flag_brain = True
+    flag_img_list = ['mag','tstat', 'noise']    # ['mag', 'tstat', 'noise'] #, 'noise'
+    flag_condition_list = [[all_trial_X_hrf_mag.trial_type.values.item()]]
+    #flag_condition_list = [['STS_o_tddr']]
+    
+    
+    der_dir = os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots', 'image_recon')
+    if not os.path.exists(der_dir):
+        os.makedirs(der_dir)
+    
+    direct_name = 'Direct'  # !!! Change when implementing indirect method
+    
+    for flag_condition in flag_condition_list:
+        
+        for flag_img in flag_img_list:
+            
+            if flag_hbo:
+                title_str = flag_condition[0] + ' HbO'
+                hbx_brain_scalp = 'hbo'
+            else:
+                title_str = flag_condition[0] + ' HbR'
+                hbx_brain_scalp = 'hbr'
+            
+            if flag_brain:
+                title_str = title_str + ' brain'
+                hbx_brain_scalp = hbx_brain_scalp + '_brain'
+            else:
+                title_str = title_str + ' scalp'
+                hbx_brain_scalp = hbx_brain_scalp + '_scalp'
+            
+            if flag_img == 'tstat':
+                #foo_img = all_trial_X_tstat.copy()
+                foo_img = all_trial_X_tstat_new.sel(trial_type=flag_condition).sel(trial_type=flag_condition[0]).copy()
+                title_str = title_str + ' t-stat'
+            elif flag_img == 'mag':
+                foo_img = all_trial_X_hrf_mag_weighted_new.sel(trial_type=flag_condition).sel(trial_type=flag_condition[0]).copy()  # plotting weighted
+                title_str = title_str + ' magnitude'
+            elif flag_img == 'noise':
+                #foo_img = all_trial_X_stderr.copy()
+                foo_img = all_trial_X_stderr_new.sel(trial_type=flag_condition).sel(trial_type=flag_condition[0]).copy()
+                title_str = title_str + ' noise'
+    
+            foo_img = foo_img.pint.dequantify()
+            foo_img = foo_img.transpose('vertex', 'chromo')    # why r we transposing these?
+            foo_img[~M] = np.nan
+            
+            clim = (-foo_img.sel(chromo='HbO').max(), foo_img.sel(chromo='HbO').max())
+            # if flag_img == 'tstat':
+            #     clim = [-5, 5]
+            p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,1), clim, hbx_brain_scalp, 'scale_bar',
+                                      None, title_str, off_screen=SAVE )
+            p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,0), clim, hbx_brain_scalp, 'left', p0)
+            p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,1), clim, hbx_brain_scalp, 'superior', p0)
+            p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (0,2), clim, hbx_brain_scalp, 'right', p0)
+            p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,0), clim, hbx_brain_scalp, 'anterior', p0)
+            p0 = pfDAB_img.plot_image_recon(foo_img, head, (2,3), (1,2), clim, hbx_brain_scalp, 'posterior', p0)
+            
+            if SAVE:
+                if not cfg_img_recon['SB']:
+                    filname = f'IMG_{flag_condition[0]}_{direct_name}_{cov_str}_{flag_img}_{hbx_brain_scalp}.png'
+                else:
+                    filname = f'IMG_{flag_condition[0]}_{direct_name}_{cov_str}_{flag_img}_{hbx_brain_scalp}_SB.png'
+                p0.screenshot( os.path.join(cfg_dataset['root_dir'], 'derivatives', 'plots', 'image_recon', filname) )
+                p0.close()
+            else:
+                p0.show()
             
             
 #%%
 
 
-
-
-
-# import importlib
-# importlib.reload(pfDAB_img)
+# # import importlib
+# # importlib.reload(pfDAB_img)
 
 
 # flag_hbo = True
@@ -791,7 +932,6 @@ for flag_condition in flag_condition_list:
 # flag_recon = 'group'  # if image recon done on group avg or subjects
 # flag_img = 'tstat' # 'tstat', 'mag', 'noise'
 # flag_condition = trial_type #'DT_o_tddr' # 'ST', 'DT', 'STS'
-
 
 
 # if flag_hbo:

@@ -22,8 +22,8 @@ from tkinter import filedialog
 
 import sys
 
-import spatial_basis_funs_ced as sbf 
-
+import module_spatial_basis_funs_ced as sbf 
+import pdb
 
 
 #
@@ -203,9 +203,10 @@ def do_image_recon( hrf_od = None, head = None, Adot = None, C_meas = None, wave
             
             L = np.sqrt(B + lambda_spatial)
             Linv = 1/L
-            Linv = np.diag(Linv)
-            
-            A_hat = A @ Linv
+            # Linv = np.diag(Linv)
+
+            # A_hat = A @ Linv
+            A_hat = A * Linv
             
             #% GET W
             F = A_hat @ A_hat.T
@@ -213,15 +214,15 @@ def do_image_recon( hrf_od = None, head = None, Adot = None, C_meas = None, wave
             print(f'   f = {f}')
             
             C = F #A @ (Linv ** 2) @ A.T
-            D = Linv**2 @ A.T
+            D = Linv[:, np.newaxis]**2 * A.T
         else:
             f = max(np.diag(C))
-            
+#        pdb.set_trace()
         for alpha_meas in cfg_img_recon['alpha_meas_list']:
             
             print(f'   Doing image recon with alpha_meas = {alpha_meas}')
             
-
+        
             if cfg_img_recon['BRAIN_ONLY'] and W is None:
                 Adot_stacked = xr.DataArray(A, dims=("flat_channel", "flat_vertex"))
                 W = pseudo_inverse_stacked(Adot_stacked, alpha=alpha_meas)
@@ -319,9 +320,11 @@ def do_image_recon( hrf_od = None, head = None, Adot = None, C_meas = None, wave
                                         coords = {'chromo': ['HbO', 'HbR'],
                                                 'parcel': ('vertex',Adot.coords['parcel'].values),
                                                 'is_brain':('vertex', Adot.coords['is_brain'].values),
-                                                'time': od_mag_pruned.time.values},
+                                                'time': od_mag_pruned.time.values * units.s,
+                                                'samples': ("time", np.arange(len(od_mag_pruned.time.values)))},
                                         )
                     X = X.set_xindex("parcel")
+                    X.time.attrs['units'] = 's'
 
             
             # !!! SHOULD we also save W, C, D, C_meas?????
@@ -446,28 +449,28 @@ def plot_image_recon( X, head, shape, iax,clim=(0,1), flag_hbx='hbo_brain', view
     if flag_hbx == 'hbo_brain': # hbo brain 
         surf = cdc.VTKSurface.from_trimeshsurface(head.brain)
         surf = pv.wrap(surf.mesh)
-        clim=(-X_hbo_brain.max(), X_hbo_brain.max())
+#        clim=(-X_hbo_brain.max(), X_hbo_brain.max())
         p0.add_mesh(surf, scalars=X_hbo_brain, cmap=custom_cmap, clim=clim, show_scalar_bar=show_scalar_bar, nan_color=(0.9,0.9,0.9), smooth_shading=True )
         p0.camera_position = pos
 
     elif flag_hbx == 'hbr_brain': # hbr brain
         surf = cdc.VTKSurface.from_trimeshsurface(head.brain)
         surf = pv.wrap(surf.mesh)   
-        clim=(-X_hbr_brain.max(), X_hbr_brain.max())
+#        clim=(-X_hbr_brain.max(), X_hbr_brain.max())
         p0.add_mesh(surf, scalars=X_hbr_brain, cmap=custom_cmap, clim=clim, show_scalar_bar=show_scalar_bar, nan_color=(0.9,0.9,0.9), smooth_shading=True )
         p0.camera_position = pos
 
     elif flag_hbx == 'hbo_scalp': # hbo scalp
         surf = cdc.VTKSurface.from_trimeshsurface(head.scalp)
         surf = pv.wrap(surf.mesh)
-        clim=(-X_hbo_brain.max(), X_hbo_brain.max())
+#        clim=(-X_hbo_brain.max(), X_hbo_brain.max())
         p0.add_mesh(surf, scalars=X_hbo_scalp, cmap=custom_cmap, clim=clim, show_scalar_bar=show_scalar_bar, nan_color=(0.9,0.9,0.9), smooth_shading=True )
         p0.camera_position = pos
 
     elif flag_hbx == 'hbr_scalp': # hbr scalp
         surf = cdc.VTKSurface.from_trimeshsurface(head.scalp)
         surf = pv.wrap(surf.mesh)
-        clim=(-X_hbr_brain.max(), X_hbr_brain.max())
+#        clim=(-X_hbr_brain.max(), X_hbr_brain.max())
         p0.add_mesh(surf, scalars=X_hbr_scalp, cmap=custom_cmap, clim=clim, show_scalar_bar=show_scalar_bar, nan_color=(0.9,0.9,0.9), smooth_shading=True )
         p0.camera_position = pos
 
