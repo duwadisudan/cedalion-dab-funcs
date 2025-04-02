@@ -287,10 +287,15 @@ def GLM_designMat(z_resamp, lstWalk, hWin, lstWalktmp):
     return A, AA
 
 def plotGaitRatio(rec, dod, gaitRatio_b4, gaitRatio_af, filenm = None, filepath = None):
+    # If save path for plot does not exist, create it
+    der_dir = os.path.join(filepath, 'derivatives', 'plots', 'DQR', 'walking_filter')
+    if not os.path.exists(der_dir):
+        os.makedirs(der_dir)
+        
     # Plot gait artifact ratio before and after correction
     foo = gaitRatio_b4[0,:]
 
-    f, ax = plt.subplots(2, 1, figsize=(5, 5))
+    f, ax = plt.subplots(2, 1, figsize=(10, 10))
     plots.scalp_plot( 
             dod,
             rec.geo3d,
@@ -320,7 +325,7 @@ def plotGaitRatio(rec, dod, gaitRatio_b4, gaitRatio_af, filenm = None, filepath 
     
     plt.suptitle(filenm)
 
-    plt.savefig( os.path.join(filepath, 'derivatives', 'plots', filenm + "_imu_glm_gaitRatio.png") )
+    plt.savefig( os.path.join(filepath, 'derivatives', 'plots','DQR', 'walking_filter', filenm + "_imu_glm_gaitRatio.png") )
     plt.close()
     
 def plotVarExp(rec, dod, z_resamp, varExp, filenm = None, filepath = None):
@@ -344,5 +349,5 @@ def plotVarExp(rec, dod, z_resamp, varExp, filenm = None, filepath = None):
     
     plt.suptitle(filenm)
 
-    plt.savefig( os.path.join(filepath, 'derivatives', 'plots', filenm + "_imu_glm_varExp.png") )
+    plt.savefig( os.path.join(filepath, 'derivatives', 'plots','DQR', 'walking_filter', filenm + "_imu_glm_varExp.png") )
     plt.close()

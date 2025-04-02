@@ -9,40 +9,32 @@ import cedalion.xrutils as xrutils
 import cedalion.datasets as datasets
 import xarray as xr
 import matplotlib.pyplot as p
+import matplotlib.colors as clrs
 import cedalion.plots as plots
-#import cedalion.vis.time_series as vTimeSeries
 from cedalion import units
 import numpy as np
 
-from scipy.cluster.hierarchy import dendrogram, linkage, leaves_list, fcluster
-from scipy.spatial.distance import squareform
-
-from sklearn.decomposition import PCA
-from cedalion.sigdecomp.ERBM import ERBM
-from scipy import stats
 from scipy.signal import filtfilt
 from scipy.signal.windows import gaussian
 
+import pdb
 
 
-def plotDQR( rec = None, chs_pruned = None, slope = None, filenm = None, filepath = None, stim_lst_str = None ):
+def plotDQR( rec = None, chs_pruned = None, cfg_preprocess = None, filenm = None, filepath = None, stim_lst_str = None ):
 
     f, ax = p.subplots(3, 2, figsize=(11, 14))
 
     # Plot GVTD
     ax[0][0].plot( rec.aux_ts["gvtd"].time, rec.aux_ts["gvtd"], color='b', label="GVTD")
-    ax[0][0].plot( rec.aux_ts["gvtd"].time, rec.aux_ts["gvtd_tddr"], color='#ff4500', label="GVTD TDDR")
+    if 'gvtd_corrected' in rec.aux_ts.keys():
+        ax[0][0].plot( rec.aux_ts["gvtd"].time, rec.aux_ts["gvtd_corrected"], color='#ff4500', label="GVTD corrected")
     ax[0][0].set_xlabel("time / s")
     ax[0][0].set_title(f"{filenm}")
-    #thresh = quality._get_gvtd_threshold(rec.aux_ts['gvtd'].values, quality.gvtd_stat_type.Histogram_Mode, n_std = 10)
     thresh = quality._get_gvtd_threshold(rec.aux_ts['gvtd'], 'histogram_mode', n_std = 10)
-    #thresh = quality._get_gvtd_threshold(rec.aux_ts['gvtd'].values, 'histogram_mode', n_std = 10)
     ax[0][0].axhline(thresh.values, color='b', linestyle='--', label=f'Thresh {thresh:.1e}')
-    #thresh_tddr = quality._get_gvtd_threshold(rec.aux_ts['gvtd_tddr'].values, quality.gvtd_stat_type.Histogram_Mode, n_std = 10)
-    thresh_tddr = quality._get_gvtd_threshold(rec.aux_ts['gvtd_tddr'], 'histogram_mode', n_std = 10)
-    #thresh_tddr = quality._get_gvtd_threshold(rec.aux_ts['gvtd_tddr'].values, 'histogram_mode', n_std = 10)
-
-    ax[0][0].axhline(thresh_tddr.values, color='#ff4500', linestyle='--', label=f'Thresh {thresh_tddr:.1e}')
+    if 'gvtd_corrected' in rec.aux_ts.keys():
+        thresh_corrected = quality._get_gvtd_threshold(rec.aux_ts['gvtd_corrected'], 'histogram_mode', n_std = 10)
+        ax[0][0].axhline(thresh_corrected.values, color='#ff4500', linestyle='--', label=f'Thresh {thresh_corrected:.1e}')
     ax[0][0].legend()
 
     stim = rec.stim.copy()
@@ -53,7 +45,8 @@ def plotDQR( rec = None, chs_pruned = None, slope = None, filenm = None, filepat
     labels.append(stim_lst_str)
     ax[0][0].legend(handles, labels)
 
-    # plot the pruned channels
+
+    # Plot the pruned channels
     idx_good = np.where(chs_pruned.values == 0.4)[0]
     plots.scalp_plot( 
             rec["amp"],
@@ -67,109 +60,220 @@ def plotDQR( rec = None, chs_pruned = None, slope = None, filenm = None, filepat
             title=f"Pruned Channels {(len(chs_pruned)-len(idx_good))/len(chs_pruned)*100:.1f}%",
             optode_size=6
         )
-
+    
+    
+    # plot variance of OD along time axis for wavelength 1 (post corrected) 
+    # !!! will want to make more modular by allowing any od rec_str in future
     ax1 = ax[1][0]
-    variance_vals = np.log10( rec['od_o_tddr'].values.var(axis=2))
+    #pdb.set_trace()
+    variance_vals = np.log10( rec['od_corrected'].values.var(axis=2))
     variance_vals_da = xr.DataArray(variance_vals, dims=["channel", "wavelength"], coords={"channel": rec["od"].channel, "wavelength": rec["od"].wavelength})
     max_variance = np.nanmax(variance_vals)
     min_variance = np.nanmin(variance_vals)
-    wav =rec['amp'].wavelength.values[0]
+    wav = rec['amp'].wavelength.values[0]  # first wav
     plots.scalp_plot(
             rec["od"],
             rec.geo3d,
-            variance_vals_da.isel(wavelength=0),
+            variance_vals_da.isel(wavelength=0),  # first wav
             ax1,
             cmap='jet',
             vmin=min_variance,
             vmax=max_variance,
             optode_labels=False,
-            title=f"OD_o_tddr Variance - {wav} nm",
+            title=f"OD Variance - {wav} nm",
             optode_size=6
         )
-
+    
+    # plot variance of OD along time axis for wavelength 2 (post correction) 
     ax1 = ax[1][1]
-    variance_vals = np.log10( rec['od_tddr'].values.var(axis=2))
+    variance_vals = np.log10( rec['od_corrected'].values.var(axis=2))
     variance_vals_da = xr.DataArray(variance_vals, dims=["channel", "wavelength"], coords={"channel": rec["od"].channel, "wavelength": rec["od"].wavelength})
     max_variance = np.nanmax(variance_vals)
     min_variance = np.nanmin(variance_vals)
+    wav = rec['amp'].wavelength.values[1]  # 2nd wav
+    plots.scalp_plot(
+            rec["od"],
+            rec.geo3d,
+            variance_vals_da.isel(wavelength=1),  # 2nd wav
+            ax1,
+            cmap='jet',
+            vmin=min_variance,
+            vmax=max_variance,
+            optode_labels=False,
+            title=f"OD  Variance - {wav} nm",
+            optode_size=6
+        )
+
+    # Plot SNR (for wav 1)
+    ax1 = ax[2][0]
+    snr_thresh = cfg_preprocess['cfg_prune']['snr_thresh']
+    snr, snr_mask = quality.snr(rec['amp'], snr_thresh)
+    
+    snr_mask_wav = snr_mask.isel(wavelength=0)
+    num_above_thresh = snr_mask_wav.sum().item() # count 'True' (num chans where SNR > thresh)
+    
     wav = rec['amp'].wavelength.values[0]
     plots.scalp_plot(
-            rec["od"],
+            rec["amp"],
             rec.geo3d,
-            variance_vals_da.isel(wavelength=1),
+            snr.isel(wavelength=0),
             ax1,
             cmap='jet',
-            vmin=min_variance,
-            vmax=max_variance,
+            vmin = 0,  #np.min(snr.isel(wavelength=0)),
+            vmax = 25,  #np.max(snr.isel(wavelength=0)),
             optode_labels=False,
-            title=f"OD_tddr Variance = {wav} nm",
+            title=f"SNR - {wav} nm ({num_above_thresh/len(chs_pruned)*100:.1f}% chans > threshold = {snr_thresh})",
             optode_size=6
         )
-
-    # plot the base slope as a scalp plot
-    # get the slope values for each channel and change units to per 10min rather than per second
-    if slope[0] is not None:
-        ax1 = ax[2][0]
-        slope_vals = slope[0].slope.values * 60 * 10
-        # create a data array of the slope values
-        slope_vals_da = xr.DataArray(slope_vals, dims=["channel", "wavelength"], coords={"channel": rec["od"].channel, "wavelength": rec["od"].wavelength})
-        # get max of the absolute value of the slope values
-        max_slope = np.nanmax(np.abs(slope_vals))
-        plots.scalp_plot(
-                rec["od"],
-                rec.geo3d,
-                slope_vals_da.isel(wavelength=0),
-                ax1,
-                cmap='jet',
-                vmin=-max_slope,
-                vmax=max_slope,
-                optode_labels=False,
-                title="Baseline Slope",
-                optode_size=6
-            )
-
-    # plot the tddr slope as a scalp plot
+    
+    # Plot SNR (for wav 2)
     ax1 = ax[2][1]
-    # get the slope values for each channel and change units to per 10min rather than per second
-    slope_vals = slope[1].slope.values * 60 * 10
-    # create a data array of the slope values
-    slope_vals_da = xr.DataArray(slope_vals, dims=["channel", "wavelength"], coords={"channel": rec["od_tddr"].channel, "wavelength": rec["od_tddr"].wavelength})
-    # get max of the absolute value of the slope values
-    max_slope = np.nanmax(np.abs(slope_vals))
+    snr_thresh = cfg_preprocess['cfg_prune']['snr_thresh']
+    snr, snr_mask = quality.snr(rec['amp'], snr_thresh)
+    
+    snr_mask_wav = snr_mask.isel(wavelength=1)
+    num_above_thresh = snr_mask_wav.sum().item() # count 'True' (num chans where SNR > thresh)
+    
+    wav = rec['amp'].wavelength.values[1]
     plots.scalp_plot(
-            rec["od_tddr"],
+            rec["amp"],
             rec.geo3d,
-            slope_vals_da.isel(wavelength=0),
+            snr.isel(wavelength=1),
             ax1,
             cmap='jet',
-            vmin=-max_slope,
-            vmax=max_slope,
+            vmin = 0,  #np.min(snr.isel(wavelength=1)),
+            vmax = 25,  #np.max(snr.isel(wavelength=1)),
             optode_labels=False,
-            title="TDDR Slope",
+            title=f"SNR - {wav} nm ({num_above_thresh/len(chs_pruned)*100:.1f}% chans > threshold = {snr_thresh})",
             optode_size=6
         )
+
         
     # give a title to the figure
-    p.suptitle(filenm)
+    if cfg_preprocess['flag_prune_channels']:  # !!! add if puned or unpruned to title and file name? - matters for gvtd and variance
+        flag_prune = '_pruned'
+    else:
+        flag_prune = '_unpruned'
+        
+    fig_title = filenm + flag_prune
+    
+    p.suptitle(fig_title)
 
-    p.savefig( os.path.join(filepath, 'derivatives', 'plots', 'DQR', filenm + "_DQR.png") )
+    p.savefig( os.path.join(filepath, 'derivatives', 'plots', 'DQR', fig_title + "_DQR.png") )
     p.close()
+    
+    # GVTD plots:
+    der_dir = os.path.join(filepath, 'derivatives', 'plots', 'DQR', 'gvtd')
+    if not os.path.exists(der_dir):
+        os.makedirs(der_dir)
 
     # Plot the GVTD Histograms
-    #thresh = pfDAB.find_gvtd_thresh(rec[idx_file].aux_ts['gvtd'].values, statType, nStd)
-    thresh = make_gvtd_hist(rec.aux_ts['gvtd'], plot_thresh=True, stat_type='histogram_mode', n_std=10) # !!! why recalc thresh? do we need to?
-    p.suptitle(filenm)
-    p.savefig( os.path.join(filepath, 'derivatives', 'plots', 'DQR', filenm + "_DQR_gvtd_hist.png") )
-    p.close()
-
-    # #thresh = pfDAB.find_gvtd_thresh(rec[idx_file].aux_ts['gvtd_tddr'].values, statType, nStd)
-    thresh_tddr = make_gvtd_hist(rec.aux_ts['gvtd_tddr'], plot_thresh=True, stat_type='histogram_mode', n_std=10)
-    p.suptitle(filenm)
-    p.savefig( os.path.join(filepath, 'derivatives', 'plots', 'DQR', filenm + "_DQR_gvtd_hist_tddr.png") )
-    p.close()
-
+    # thresh = make_gvtd_hist(rec.aux_ts['gvtd'], plot_thresh=True, stat_type='histogram_mode', n_std=10) # !!! why recalc thresh? do we need to?
+    # p.suptitle(fig_title)
+    # p.savefig( os.path.join(filepath, 'derivatives', 'plots', 'DQR','gvtd', fig_title + "_DQR_gvtd_hist.png") )
+    # p.close()
+    
+    # if 'gvtd_corrected' in rec.aux_ts.keys():
+        # thresh_corrected = make_gvtd_hist(rec.aux_ts['gvtd_corrected'], plot_thresh=True, stat_type='histogram_mode', n_std=10)
+        # p.suptitle(fig_title)
+        # p.savefig( os.path.join(filepath, 'derivatives', 'plots', 'DQR','gvtd', fig_title + "_DQR_gvtd_hist_corrected.png") )
+        # p.close()
+    
+    if 'gvtd_corrected' in rec.aux_ts.keys():
+        der_dir = os.path.join(filepath, 'derivatives', 'plots', 'DQR', 'gvtd')
+        if not os.path.exists(der_dir):
+            os.makedirs(der_dir)
+        
+        thresh_b4, thresh_corrected = make_gvtd_hist_compare_corrected(rec.aux_ts['gvtd'], rec.aux_ts['gvtd_corrected'], plot_thresh=True, stat_type='histogram_mode', n_std=10)
+        p.suptitle(filenm)
+        p.savefig( os.path.join(filepath, 'derivatives', 'plots', 'DQR','gvtd', fig_title + "_DQR_gvtd_hist_compare.png") )
+        p.close()
+    
 
     return
+
+
+def make_gvtd_hist_compare_corrected(gvtd_time_trace_1, gvtd_time_trace_2, plot_thresh=True, stat_type=None, n_std=None):
+    """Generate a histogram of GVTD values and optionally overlay a threshold line.
+
+    Code from:
+    https://github.com/sherafatia/GVTD
+    Sherafati, A., Snyder, A. Z., Eggebrecht, A. T., Bergonzi, K. M., Burns-Yocum,
+    T. M., Lugar, H. M., Ferradal, S. L., Robichaux-Viehoever, A., Smyser, C. D.,
+    Palanca, B. J., Hershey, T. & Culver, J. P. Global motion detection and censoring
+    in high-density diffuse optical tomography. Hum. Brain Mapp. 41, 4093?4112 (2020).
+    converted from matlab by chatGPT
+
+    Args:
+        gvtd_time_trace (array-like): GVTD time trace (1D array).
+        plot_thresh (bool): Whether to plot the threshold on the histogram. Default is
+            True.
+        stat_type (str): Statistic type for threshold calculation (e.g., from StatType).
+            Default is Histogram_Mode.
+        n_std (int or float): Number of standard deviations for threshold calculation.
+            Default is 4.
+        bin_size (float): Size of histogram bins. If None, it's calculated based on
+            data.
+
+    Returns:
+        float: Calculated threshold value if `plot_thresh` is True; otherwise, None.
+    """
+    # Set default values
+    if stat_type is None:
+        stat_type = 'histogram_mode'
+    if plot_thresh is None:
+        plot_thresh = True
+    if n_std is None and plot_thresh:
+        n_std = 4
+
+    # Calculate bin size if not provided
+    min_counts_each_bin = 5
+    n_bins_1 = round(len(gvtd_time_trace_1) / min_counts_each_bin)
+    bin_size_1 = np.max(gvtd_time_trace_1) / n_bins_1
+    
+    n_bins_2 = round(len(gvtd_time_trace_2) / min_counts_each_bin)
+    bin_size_2 = np.max(gvtd_time_trace_2) / n_bins_2
+
+    f, ax = p.subplots(1, 2, figsize=(11, 5))
+
+    # B4 correction
+    # Create the histogram
+    bins_1 = np.arange(0, np.max(gvtd_time_trace_1) + bin_size_1, bin_size_1)
+    ax[0].hist(gvtd_time_trace_1, bins=bins_1, edgecolor='black', alpha=0.75)
+    ax[0].set_title('GVTD Histogram')
+    ax[0].set_xlabel('GVTD')
+    ax[0].set_ylabel('Counts')
+
+    threshold_1 = None
+    if plot_thresh:
+        # Calculate the threshold
+        threshold_1 = quality._get_gvtd_threshold(gvtd_time_trace_1, stat_type, n_std)
+
+        # Plot the threshold line
+        ax[0].axvline(threshold_1.values, color='red', linestyle='--', label=f'Threshold: {threshold_1:.4f}')
+        ax[0].legend()
+        
+        
+    # After correction
+    # Create the histogram
+    bins_2 = np.arange(0, np.max(gvtd_time_trace_2) + bin_size_2, bin_size_2)
+    ax[1].hist(gvtd_time_trace_2, bins=bins_2, edgecolor='black', alpha=0.75)
+    ax[1].set_title('GVTD Histogram - corrected')
+    ax[1].set_xlabel('GVTD')
+    ax[1].set_ylabel('Counts')
+
+    threshold_2 = None
+    if plot_thresh:
+        # Calculate the threshold
+        threshold_2 = quality._get_gvtd_threshold(gvtd_time_trace_2, stat_type, n_std)
+
+        # Plot the threshold line
+        ax[1].axvline(threshold_2.values, color='red', linestyle='--', label=f'Threshold: {threshold_2:.4f}')
+        ax[1].legend()
+
+    return threshold_1, threshold_2
+    
+
 
 
 def make_gvtd_hist(gvtd_time_trace, plot_thresh=True, stat_type=None, n_std=None, 
@@ -232,6 +336,78 @@ def make_gvtd_hist(gvtd_time_trace, plot_thresh=True, stat_type=None, n_std=None
 
     return threshold
 
+
+
+
+def plot_slope(rec = None, slope = None, cfg_preprocess=None, filenm = None, filepath = None):
+    '''
+    Plot slope before and after correction on a scalp plot.
+    '''
+    der_dir = os.path.join(filepath, 'derivatives', 'plots', 'DQR', 'motion')
+    if not os.path.exists(der_dir):
+        os.makedirs(der_dir)
+    
+    f, ax = p.subplots(2, 1, figsize=(10, 10))
+    # plot the base slope as a scalp plot
+    # get the slope values for each channel and change units to per 10min rather than per second
+    if slope[0] is not None:
+        ax1 = ax[0]
+        slope_vals = slope[0].slope.values * 60 * 10
+        # create a data array of the slope values
+        slope_vals_da = xr.DataArray(slope_vals, dims=["channel", "wavelength"], coords={"channel": rec["od"].channel, "wavelength": rec["od"].wavelength})
+        # get max of the absolute value of the slope values
+        max_slope = np.nanmax(np.abs(slope_vals))
+        plots.scalp_plot(
+                rec["od"],
+                rec.geo3d,
+                slope_vals_da.isel(wavelength=0),
+                ax1,
+                cmap='jet',
+                vmin=-max_slope,
+                vmax=max_slope,
+                optode_labels=False,
+                title="Baseline Slope",
+                optode_size=6
+            )
+
+    # plot the tddr slope as a scalp plot
+    ax1 = ax[1]
+    # get the slope values for each channel and change units to per 10min rather than per second
+    slope_vals = slope[1].slope.values * 60 * 10
+    # create a data array of the slope values
+    slope_vals_da = xr.DataArray(slope_vals, dims=["channel", "wavelength"], coords={"channel": rec["od_corrected"].channel, "wavelength": rec["od_corrected"].wavelength})
+    # get max of the absolute value of the slope values
+    max_slope = np.nanmax(np.abs(slope_vals))
+    plots.scalp_plot(
+            rec["od_corrected"],
+            rec.geo3d,
+            slope_vals_da.isel(wavelength=0),
+            ax1,
+            cmap='jet',
+            vmin=-max_slope,
+            vmax=max_slope,
+            optode_labels=False,
+            title="OD Corrected Slope",
+            optode_size=6
+        )
+    
+    # give a title to the figure
+    if cfg_preprocess['flag_prune_channels']:  # !!! add if puned or unpruned to title and file name? - matters for gvtd and variance
+        flag_prune = '_pruned'
+    else:
+        flag_prune = '_unpruned'
+        
+    fig_title = filenm + flag_prune
+    
+    p.suptitle(fig_title)
+
+    p.savefig( os.path.join(filepath, 'derivatives', 'plots', 'DQR', 'motion', fig_title + "_slope.png") )
+    p.close()
+    
+    return
+    
+    
+    
 
 def plotDQR_sidecar(file_json, rec, filepath, filenm):
 
@@ -737,27 +913,30 @@ def plot_tIncCh_dqr( rec, filepath, filenm_lst, iqr_threshold_std=2, iqr_thresho
 
     return rec
 
-
-def plot_group_dqr( n_subjects, n_files_per_subject, chs_pruned_subjs, slope_base_subjs, slope_tddr_subjs, gvtd_tddr_subjs, snr0_subjs, snr1_subjs, subj_ids, rec, filepath, flag_plot = True):   
-
+# !!! plot_group_dqr will fail if no tddr ?
+def plot_group_dqr( n_subjects, n_files_per_subject, chs_pruned_subjs, slope_base_subjs, slope_corrected_subjs, gvtd_corrected_subjs, snr0_subjs, snr1_subjs, subj_ids, subj_id_exclude, rec, filepath, flag_plot = True):   
+    n_subjects = n_subjects = len(subj_ids) - len(subj_id_exclude)
+    subj_ids_new = [s for s in subj_ids if s not in subj_id_exclude]
+    
     chs_pruned_percent = np.zeros( (n_subjects, n_files_per_subject) )
     for subj_idx in range(n_subjects):
+        
         for file_idx in range(n_files_per_subject):
             n_chs = len(chs_pruned_subjs[subj_idx][file_idx])
             n_chs_pruned = len( np.where( chs_pruned_subjs[subj_idx][file_idx] != 0.4 )[0] )
             chs_pruned_percent[subj_idx, file_idx] = 100 * n_chs_pruned / n_chs
 
     slope_base_abs = np.zeros( (n_subjects, n_files_per_subject) )
-    slope_tddr_abs = np.zeros( (n_subjects, n_files_per_subject) )
+    slope_corrected_abs = np.zeros( (n_subjects, n_files_per_subject) )
     for subj_idx in range(n_subjects):
         for file_idx in range(n_files_per_subject):
             slope_base_abs[subj_idx, file_idx] = np.nanmax(np.abs(slope_base_subjs[subj_idx][file_idx].slope.values)) * 60 * 10
-            slope_tddr_abs[subj_idx, file_idx] = np.nanmax(np.abs(slope_tddr_subjs[subj_idx][file_idx].slope.values)) * 60 * 10
+            slope_corrected_abs[subj_idx, file_idx] = np.nanmax(np.abs(slope_corrected_subjs[subj_idx][file_idx].slope.values)) * 60 * 10
 
-    gvtd_tddr_mean = np.zeros( (n_subjects, n_files_per_subject) )
+    gvtd_corrected_mean = np.zeros( (n_subjects, n_files_per_subject) )
     for subj_idx in range(n_subjects):
         for file_idx in range(n_files_per_subject):
-            gvtd_tddr_mean[subj_idx, file_idx] = gvtd_tddr_subjs[subj_idx][file_idx]
+            gvtd_corrected_mean[subj_idx, file_idx] = gvtd_corrected_subjs[subj_idx][file_idx]
 
     snr0_mean = np.zeros( (n_subjects, n_files_per_subject) )
     snr1_mean = np.zeros( (n_subjects, n_files_per_subject) )
@@ -765,8 +944,8 @@ def plot_group_dqr( n_subjects, n_files_per_subject, chs_pruned_subjs, slope_bas
         for file_idx in range(n_files_per_subject):
             snr0_mean[subj_idx, file_idx] = snr0_subjs[subj_idx][file_idx]
             snr1_mean[subj_idx, file_idx] = snr1_subjs[subj_idx][file_idx]
-    lambda0 = rec[0][0]["amp_pruned"].wavelength[0].wavelength.values
-    lambda1 = rec[0][0]["amp_pruned"].wavelength[1].wavelength.values
+    lambda0 = rec[0][0]["amp"].wavelength[0].wavelength.values
+    lambda1 = rec[0][0]["amp"].wavelength[1].wavelength.values
 
     # bar graph of the percentage of channels pruned
     f, ax = p.subplots(2,2, figsize=(9,10))
@@ -776,17 +955,17 @@ def plot_group_dqr( n_subjects, n_files_per_subject, chs_pruned_subjs, slope_bas
     axtmp.bar( np.arange(n_subjects), np.mean(chs_pruned_percent,axis=1), color='k' )
     for subj_idx in range(n_subjects):
         axtmp.scatter( subj_idx*np.ones(n_files_per_subject), chs_pruned_percent[subj_idx,:], color='gray', marker='x' )
-    axtmp.set_xticks( np.arange(n_subjects), subj_ids )
+    axtmp.set_xticks( np.arange(n_subjects), subj_ids_new )
     axtmp.set_xlabel('Subject')
     axtmp.set_ylabel('Percentage')
     axtmp.set_title('Channels Pruned')
 
     # gvtd mean
     axtmp = ax[0][1]
-    axtmp.bar( np.arange(n_subjects), np.mean(gvtd_tddr_mean,axis=1), color='k' )
+    axtmp.bar( np.arange(n_subjects), np.mean(gvtd_corrected_mean,axis=1), color='k' )
     for subj_idx in range(n_subjects):
-        axtmp.scatter( subj_idx*np.ones(n_files_per_subject), gvtd_tddr_mean[subj_idx,:], color='gray', marker='x' )
-    axtmp.set_xticks( np.arange(n_subjects), subj_ids )
+        axtmp.scatter( subj_idx*np.ones(n_files_per_subject), gvtd_corrected_mean[subj_idx,:], color='gray', marker='x' )
+    axtmp.set_xticks( np.arange(n_subjects), subj_ids_new )
     axtmp.set_xlabel('Subject')
     foo_exp = np.max(np.round(np.log10(axtmp.get_yticks())))
     foo = axtmp.get_yticklabels()
@@ -805,7 +984,7 @@ def plot_group_dqr( n_subjects, n_files_per_subject, chs_pruned_subjs, slope_bas
     axtmp.bar( np.arange(n_subjects)+h, np.mean(snr1_mean,axis=1), color='r', label=f'lambda={lambda1}', width=0.4)
     for subj_idx in range(n_subjects):
         axtmp.scatter( subj_idx*np.ones(n_files_per_subject)+h, snr1_mean[subj_idx,:], color='m', marker='x' )
-    axtmp.set_xticks( np.arange(n_subjects), subj_ids )
+    axtmp.set_xticks( np.arange(n_subjects), subj_ids_new )
     axtmp.set_xlabel('Subject')
     axtmp.legend()
     axtmp.set_title('SNR')
@@ -815,10 +994,10 @@ def plot_group_dqr( n_subjects, n_files_per_subject, chs_pruned_subjs, slope_bas
     axtmp.bar( np.arange(n_subjects)-h, np.mean(slope_base_abs,axis=1), color='b', label='Base', width=0.4)
     for subj_idx in range(n_subjects):
         axtmp.scatter( subj_idx*np.ones(n_files_per_subject)-h, slope_base_abs[subj_idx,:], color='c', marker='x' )
-    axtmp.bar( np.arange(n_subjects)+h, np.mean(slope_tddr_abs,axis=1), color='r', label='TDDR', width=0.4)
+    axtmp.bar( np.arange(n_subjects)+h, np.mean(slope_corrected_abs,axis=1), color='r', label='Corrected', width=0.4)
     for subj_idx in range(n_subjects):
-        axtmp.scatter( subj_idx*np.ones(n_files_per_subject)+h, slope_tddr_abs[subj_idx,:], color='m', marker='x' )
-    axtmp.set_xticks( np.arange(n_subjects), subj_ids )
+        axtmp.scatter( subj_idx*np.ones(n_files_per_subject)+h, slope_corrected_abs[subj_idx,:], color='m', marker='x' )
+    axtmp.set_xticks( np.arange(n_subjects), subj_ids_new )
     axtmp.set_xlabel('Subject')
     foo_exp = np.max(np.round(np.log10(axtmp.get_yticks())))
     foo =  ( axtmp.get_yticks() ) / 10**foo_exp
@@ -829,7 +1008,7 @@ def plot_group_dqr( n_subjects, n_files_per_subject, chs_pruned_subjs, slope_bas
         foo = [f"{x:.1f}e{foo_exp:.0f}" for x in foo]
     axtmp.set_yticklabels(foo, rotation=60 )
     axtmp.legend()
-    axtmp.set_title('Max Slope TDDR')
+    axtmp.set_title('Max Slope Corrected')
 
     # give a title to the figure
     dirnm = os.path.basename(os.path.normpath(filepath))
@@ -922,3 +1101,156 @@ def plot_gradCPT_VTC( stim, filepath, filenm ):
 
     p.savefig( os.path.join(filepath, 'derivatives', 'plots', filenm + "_DQR_gradCPT_VTC.png") )
     p.close()
+
+
+#%%
+
+
+# !!! keeping old plotting func to go back and use slope stuff for diff fig
+def plotDQR_old( rec = None, chs_pruned = None, slope = None, filenm = None, filepath = None, stim_lst_str = None ):
+
+    f, ax = p.subplots(3, 2, figsize=(11, 14))
+
+    # Plot GVTD
+    ax[0][0].plot( rec.aux_ts["gvtd"].time, rec.aux_ts["gvtd"], color='b', label="GVTD")
+    ax[0][0].plot( rec.aux_ts["gvtd"].time, rec.aux_ts["gvtd_corrected"], color='#ff4500', label="GVTD Corrected")
+    ax[0][0].set_xlabel("time / s")
+    ax[0][0].set_title(f"{filenm}")
+    thresh = quality._get_gvtd_threshold(rec.aux_ts['gvtd'], 'histogram_mode', n_std = 10)
+    ax[0][0].axhline(thresh.values, color='b', linestyle='--', label=f'Thresh {thresh:.1e}')
+    thresh_corrected = quality._get_gvtd_threshold(rec.aux_ts['gvtd_corrected'], 'histogram_mode', n_std = 10)
+
+    ax[0][0].axhline(thresh_corrected.values, color='#ff4500', linestyle='--', label=f'Thresh {thresh_corrected:.1e}')
+    ax[0][0].legend()
+
+    stim = rec.stim.copy()
+    if stim_lst_str is not None:
+        plots.plot_stim_markers(ax[0][0], stim[stim.trial_type.isin(stim_lst_str)], y=1)
+    # add stim_lst_str to the legend
+    handles, labels = ax[0][0].get_legend_handles_labels()
+    labels.append(stim_lst_str)
+    ax[0][0].legend(handles, labels)
+
+    # plot the pruned channels
+    idx_good = np.where(chs_pruned.values == 0.4)[0]
+    plots.scalp_plot( 
+            rec["amp"],
+            rec.geo3d,
+            chs_pruned,
+            ax[0][1],
+            cmap='gist_rainbow',
+            vmin=0,
+            vmax=1,
+            optode_labels=False,
+            title=f"Pruned Channels {(len(chs_pruned)-len(idx_good))/len(chs_pruned)*100:.1f}%",
+            optode_size=6
+        )
+
+    ax1 = ax[1][0]
+    variance_vals = np.log10( rec['od_o_tddr'].values.var(axis=2))
+    variance_vals_da = xr.DataArray(variance_vals, dims=["channel", "wavelength"], coords={"channel": rec["od"].channel, "wavelength": rec["od"].wavelength})
+    max_variance = np.nanmax(variance_vals)
+    min_variance = np.nanmin(variance_vals)
+    wav =rec['amp'].wavelength.values[0]
+    plots.scalp_plot(
+            rec["od"],
+            rec.geo3d,
+            variance_vals_da.isel(wavelength=0),
+            ax1,
+            cmap='jet',
+            vmin=min_variance,
+            vmax=max_variance,
+            optode_labels=False,
+            title=f"OD_o_tddr Variance - {wav} nm",
+            optode_size=6
+        )
+
+    ax1 = ax[1][1]
+    variance_vals = np.log10( rec['od_tddr'].values.var(axis=2))
+    variance_vals_da = xr.DataArray(variance_vals, dims=["channel", "wavelength"], coords={"channel": rec["od"].channel, "wavelength": rec["od"].wavelength})
+    max_variance = np.nanmax(variance_vals)
+    min_variance = np.nanmin(variance_vals)
+    wav = rec['amp'].wavelength.values[0]
+    plots.scalp_plot(
+            rec["od"],
+            rec.geo3d,
+            variance_vals_da.isel(wavelength=1),
+            ax1,
+            cmap='jet',
+            vmin=min_variance,
+            vmax=max_variance,
+            optode_labels=False,
+            title=f"OD_tddr Variance = {wav} nm",
+            optode_size=6
+        )
+
+    # plot the base slope as a scalp plot
+    # get the slope values for each channel and change units to per 10min rather than per second
+    if slope[0] is not None:
+        ax1 = ax[2][0]
+        slope_vals = slope[0].slope.values * 60 * 10
+        # create a data array of the slope values
+        slope_vals_da = xr.DataArray(slope_vals, dims=["channel", "wavelength"], coords={"channel": rec["od"].channel, "wavelength": rec["od"].wavelength})
+        # get max of the absolute value of the slope values
+        max_slope = np.nanmax(np.abs(slope_vals))
+        plots.scalp_plot(
+                rec["od"],
+                rec.geo3d,
+                slope_vals_da.isel(wavelength=0),
+                ax1,
+                cmap='jet',
+                vmin=-max_slope,
+                vmax=max_slope,
+                optode_labels=False,
+                title="Baseline Slope",
+                optode_size=6
+            )
+
+    # plot the tddr slope as a scalp plot
+    ax1 = ax[2][1]
+    # get the slope values for each channel and change units to per 10min rather than per second
+    slope_vals = slope[1].slope.values * 60 * 10
+    # create a data array of the slope values
+    slope_vals_da = xr.DataArray(slope_vals, dims=["channel", "wavelength"], coords={"channel": rec["od_tddr"].channel, "wavelength": rec["od_tddr"].wavelength})
+    # get max of the absolute value of the slope values
+    max_slope = np.nanmax(np.abs(slope_vals))
+    plots.scalp_plot(
+            rec["od_tddr"],
+            rec.geo3d,
+            slope_vals_da.isel(wavelength=0),
+            ax1,
+            cmap='jet',
+            vmin=-max_slope,
+            vmax=max_slope,
+            optode_labels=False,
+            title="TDDR Slope",
+            optode_size=6
+        )
+        
+    # give a title to the figure
+    p.suptitle(filenm)
+
+    p.savefig( os.path.join(filepath, 'derivatives', 'plots', 'DQR', filenm + "_DQR.png") )
+    p.close()
+
+    # Plot the GVTD Histograms
+    # thresh = make_gvtd_hist(rec.aux_ts['gvtd'], plot_thresh=True, stat_type='histogram_mode', n_std=10) # !!! why recalc thresh? do we need to?
+    # p.suptitle(filenm)
+    # p.savefig( os.path.join(filepath, 'derivatives', 'plots', 'DQR', filenm + "_DQR_gvtd_hist.png") )
+    # p.close()
+
+    # thresh_corrected = make_gvtd_hist(rec.aux_ts['gvtd_tddr'], plot_thresh=True, stat_type='histogram_mode', n_std=10)
+    # p.suptitle(filenm)
+    # p.savefig( os.path.join(filepath, 'derivatives', 'plots', 'DQR', filenm + "_DQR_gvtd_hist_corrected.png") )
+    # p.close()
+    
+    der_dir = os.path.join(filepath, 'derivatives', 'plots', 'DQR', 'gvtd')
+    if not os.path.exists(der_dir):
+        os.makedirs(der_dir)
+    
+    thresh_b4, thresh_corrected = make_gvtd_hist(rec.aux_ts['gvtd_tddr'], plot_thresh=True, stat_type='histogram_mode', n_std=10)
+    p.suptitle(filenm)
+    p.savefig( os.path.join(filepath, 'derivatives', 'plots', 'DQR','gvtd', filenm + "_DQR_gvtd_hist.png") )
+    p.close()
+
+    return
